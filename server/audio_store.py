@@ -20,37 +20,46 @@ from . import config
 
 log = logging.getLogger(__name__)
 
-# Windows 不允許的字元，加上空白（檔名帶空白在指令列很難用）
-_BAD_CHARS = re.compile(r'[\\/:*?"<>|\s]+')
+# Windows 不允許的字元。資料夾名保留空白（要跟 courses/*.yaml 的 name
+# 一模一樣，materials/ 也是照課名建的），檔名本身不含空白。
+_BAD_CHARS = re.compile(r'[\\/:*?"<>|]+')
+
+
+def course_folder(course, directory=None) -> Path:
+    """這門課的錄音資料夾。課名拿不到就退回 audio/ 本身。"""
+    d = Path(directory or config.AUDIO_DIR)
+    name = _BAD_CHARS.sub("", str(getattr(course, "name", "") or "")).strip()
+    return (d / name) if name else d
 
 
 def build_filename(course, started_at, session_id, directory=None,
                    suffix="") -> Path:
-    """課名_日期_時間.flac。
+    """<課名>/<日期_時間>.flac。
 
     用 uuid 當檔名的話，要從檔案總管找某一堂的錄音得先去查資料庫。
-    課名加日期時間才看得出是哪一堂——同一天同一門課會有好幾段，
-    所以時間要留到分鐘。
+    分課程資料夾、檔名帶日期時間才看得出是哪一堂——同一天同一門課會有
+    好幾段，所以時間要留到分鐘。
 
     任何一項缺漏就退回 uuid：檔名只是給人看的，不值得為了好看讓錄音存不下來。
     """
     d = Path(directory or config.AUDIO_DIR)
-    name = _BAD_CHARS.sub("", str(getattr(course, "name", "") or ""))
+    ts = None
     try:
         ts = datetime.datetime.fromisoformat(started_at)
     except (TypeError, ValueError):
-        ts = None
-    if not name or ts is None:
+        pass
+    folder = course_folder(course, d)
+    if folder == d or ts is None:
         return d / ("%s.flac" % session_id)
 
-    stem = "%s_%s_%s" % (name, ts.strftime("%Y-%m-%d"), ts.strftime("%H%M"))
+    stem = "%s_%s" % (ts.strftime("%Y-%m-%d"), ts.strftime("%H%M"))
     if suffix:
         stem += "_" + suffix
-    path = d / ("%s.flac" % stem)
+    path = folder / ("%s.flac" % stem)
     # 同一分鐘內開兩段（接續錄音、或按錯重開）會撞名
     n = 2
     while path.exists():
-        path = d / ("%s_%d.flac" % (stem, n))
+        path = folder / ("%s_%d.flac" % (stem, n))
         n += 1
     return path
 
@@ -81,7 +90,7 @@ class AudioRecorder:
             return self._f
         try:
             import soundfile as sf
-            self.dir.mkdir(parents=True, exist_ok=True)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
             self._f = sf.SoundFile(str(self.path), mode="w",
                                    samplerate=config.SAMPLE_RATE,
                                    channels=1, format="FLAC", subtype="PCM_16")
