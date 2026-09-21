@@ -1,0 +1,39 @@
+# ── 模型與二進位（14 GB，用 scripts/fetch_assets.py 重新下載）──────────
+models/
+tools/
+
+# ── 上課資料（逐字稿、錄音、筆記都是實際課堂內容，不進版控）───────────
+data/*
+!data/bench.json
+!data/.gitkeep
+*.flac
+*.wav
+
+# 匯出到根目錄的筆記草稿
+/*_學習單.md
+/*_完整版.md
+/*_手抄版.md
+
+# ── 測試素材：tests/fixtures 裡是真實課堂錄音 ─────────────────────────
+tests/fixtures/*.wav
+tests/fixtures/*.m4a
+tests/fixtures/*.flac
+
+# ── 暫存 ───────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+staging/
+*.log
+.DS_Store
+Thumbs.db
+
+# ── 憑證與私鑰：絕對不能進版控 ──────────────────────────────────────
+*.key
+*.pem
+*.crt
+*.pfx
+.env
+.env.*

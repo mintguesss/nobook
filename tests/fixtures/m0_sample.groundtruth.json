@@ -1,0 +1,19 @@
+{
+  "source": "Windows SAPI TTS（非真實錄音）",
+  "voice": "OK Microsoft Hanhan Desktop",
+  "duration_s": 242.1,
+  "term_counts": {
+    "gradient descent": 5,
+    "learning rate": 1,
+    "regularization": 4,
+    "overfitting": 3,
+    "cross validation": 4,
+    "混淆矩陣": 3,
+    "召回率": 3,
+    "transformer": 3,
+    "attention": 5,
+    "embedding": 3,
+    "特徵工程": 3
+  },
+  "note": "TTS 音訊過於乾淨，RTF 與字錯率會比真實課堂樂觀，僅供管線接通用；真實驗收見規格 §11 M5"
+}

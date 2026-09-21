@@ -1,0 +1,14 @@
+{
+  "name": "課堂即時筆記",
+  "short_name": "課堂筆記",
+  "description": "課堂即時轉錄與筆記系統",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f1216",
+  "theme_color": "#111418",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

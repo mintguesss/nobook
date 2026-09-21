@@ -1,0 +1,18 @@
+id: ml-2026
+name: 機器學習
+instructor: 施皇嘉
+asr_prompt: |
+  以下是資訊管理研究所的機器學習課程錄音，講者為施皇嘉教授。
+  常見術語：overfitting、regularization、gradient descent、cross validation、
+  特徵工程、混淆矩陣、召回率、transformer、attention、embedding。
+glossary:
+  - overfitting
+  - regularization
+  - gradient descent
+  - cross validation
+  - 特徵工程
+  - 混淆矩陣
+  - 召回率
+  - transformer
+  - attention
+  - embedding

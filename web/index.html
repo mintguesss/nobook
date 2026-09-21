@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111418">
+<title>課堂筆記</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  :root {
+    --bg: #0f1216;
+    --panel: #171b21;
+    --panel-2: #1d222a;
+    --line: #2a3039;
+    --fg: #e8ecf1;
+    --fg-dim: #94a0ae;
+    --accent: #4da3ff;
+    --ok: #35c46b;
+    --warn: #e8b13a;
+    --bad: #e8574a;
+    --btn-h: 64px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.6 "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  }
+  body { display: flex; flex-direction: column; }
+
+  /* 頂部狀態列（規格 §8.1-1）------------------------------------- */
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px; background: var(--panel);
+    border-bottom: 1px solid var(--line); flex: none;
+    padding-top: calc(10px + env(safe-area-inset-top));
+  }
+  #home {
+    flex: none; background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--accent); font-size: 14px; font-weight: 600;
+    padding: 8px 12px; border-radius: 8px; cursor: pointer;
+  }
+  #home:active { background: var(--line); }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--bad); flex: none; }
+  .dot.ok { background: var(--ok); }
+  .dot.warn { background: var(--warn); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  #elapsed { font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 600; }
+  .meta { color: var(--fg-dim); font-size: 13px; margin-left: auto; text-align: right; }
+  #course { font-weight: 600; color: var(--fg); }
+
+  /* 主體 ---------------------------------------------------------- */
+  main { flex: 1; display: flex; min-height: 0; flex-direction: column; }
+  @media (orientation: landscape) { main { flex-direction: row; } }
+
+  #transcript-wrap { position: relative; flex: 1 1 auto; min-height: 0; }
+  #transcript {
+    height: 100%; overflow-y: auto; padding: 14px 16px 24px;
+    overscroll-behavior: contain;
+  }
+  .seg {
+    margin: 0 0 10px; animation: fade .35s ease-out;
+    display: flex; gap: 10px; align-items: baseline;
+  }
+  .seg .t {
+    color: var(--fg-dim); font-size: 12px; font-variant-numeric: tabular-nums;
+    flex: none; padding-top: 3px;
+  }
+  .seg.low .x { color: var(--fg-dim); }
+  .seg.gap .x { color: var(--warn); font-size: 13px; }
+  .seg.gap .t { color: var(--warn); }
+  .seg.flash .x { background: rgba(77,163,255,.18); border-radius: 4px; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } }
+
+  #to-latest {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    background: var(--accent); color: #06121f; border: none; border-radius: 999px;
+    padding: 9px 18px; font-size: 14px; font-weight: 700; display: none;
+    box-shadow: 0 6px 18px rgba(0,0,0,.45); cursor: pointer;
+  }
+  #to-latest.show { display: block; }
+
+  /* 摘要側欄（規格 §8.1-4）---------------------------------------- */
+  #hist-top { font-size: 13px; }
+  .secsum { margin: 6px 0 10px; opacity: .85; line-height: 1.55; }
+  .sechead {
+    font-weight: 600; font-size: 13px; margin: 10px 0 2px;
+    opacity: .9; letter-spacing: .02em;
+  }
+  .secbody ul { margin: 2px 0 0; }
+  .batch { border: 1px solid #2a2f3a; border-radius: 10px; margin: 8px 6px; }
+  .batch > summary {
+    display: flex; gap: 10px; align-items: baseline; cursor: pointer;
+    padding: 9px 12px; font-weight: 600; list-style: none;
+  }
+  .batch > summary::-webkit-details-marker { display: none; }
+  .batch > summary::before { content: '▸'; opacity: .6; }
+  .batch[open] > summary::before { content: '▾'; }
+  .batch .bmeta { font-weight: 400; font-size: 12px; opacity: .6; }
+  .batch .bbody { padding: 0 6px 6px; }
+  .mergebox { margin-top: 18px; border-top: 1px solid #2a2f3a; padding-top: 10px; }
+  .mergehead { font-size: 13px; opacity: .7; padding: 4px 10px 8px; }
+  #sumbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 6px 10px; font-size: 13px; opacity: .8;
+  }
+  #summaries {
+    flex: none; max-height: 38%; overflow-y: auto;
+    background: var(--panel); border-top: 1px solid var(--line); padding: 6px 0;
+  }
+  @media (orientation: landscape) {
+    #summaries {
+      max-height: none; width: 38%; max-width: 460px;
+      border-top: none; border-left: 1px solid var(--line);
+    }
+  }
+  #summaries:empty::after {
+    content: "按下方按鈕標記重點，摘要會出現在這裡";
+    display: block; padding: 18px 16px; color: var(--fg-dim); font-size: 14px;
+  }
+  .sec { border-bottom: 1px solid var(--line); }
+  .sec > summary {
+    list-style: none; cursor: pointer; padding: 11px 16px;
+    display: flex; gap: 10px; align-items: baseline;
+  }
+  .sec > summary::-webkit-details-marker { display: none; }
+  .sec .ts {
+    color: var(--accent); font-size: 12px; font-variant-numeric: tabular-nums;
+    flex: none; text-decoration: underline dotted;
+  }
+  .sec .title { font-weight: 600; font-size: 15px; }
+  .sec ul { margin: 0 0 12px; padding: 0 16px 0 40px; }
+  .sec li { font-size: 14px; color: #cfd7e0; margin-bottom: 5px; }
+  .sec .note {
+    margin: 0 16px 12px 40px; padding: 7px 11px; font-size: 13px;
+    background: var(--panel-2); border-left: 3px solid var(--warn); border-radius: 4px;
+  }
+  .sec.pending .title { color: var(--fg-dim); }
+  .spin {
+    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid var(--fg-dim); border-top-color: transparent;
+    animation: spin .8s linear infinite; vertical-align: -1px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* 底部按鈕（規格 §8.1-3：盲按，至少 72px）---------------------- */
+  footer {
+    flex: none; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    background: var(--panel); border-top: 1px solid var(--line);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  #note {
+    display: none; width: 100%; padding: 11px 13px; font-size: 16px;
+    background: var(--panel-2); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 10px;
+  }
+  #note.show { display: block; }
+  #mark {
+    width: 100%; min-height: var(--btn-h); border: none; border-radius: 16px;
+    background: var(--accent); color: #06121f; font-size: 19px; font-weight: 800;
+    letter-spacing: 2px; cursor: pointer; touch-action: manipulation;
+    transition: transform .08s, background .15s;
+  }
+  #mark:active { transform: scale(.985); }
+  #mark:disabled { background: #39424e; color: var(--fg-dim); }
+  .row { display: flex; gap: 8px; }
+  .row button {
+    flex: 1; padding: 12px; font-size: 15px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
+    cursor: pointer;
+  }
+  .row button.danger { color: var(--bad); }
+  .row button.accent { color: var(--accent); font-weight: 600; }
+  .row button:disabled { opacity: .5; }
+
+  /* 手抄版筆記：使用者會照著抄在紙上，所以字要大、行距要鬆 */
+  #copy-view { position: fixed; inset: 0; background: var(--bg); z-index: 45;
+    display: none; flex-direction: column; }
+  #copy-view.show { display: flex; }
+  #copy-body { flex: 1; overflow-y: auto; padding: 18px 20px 28px; }
+  #copy-body h1 { font-size: 20px; margin: 0 0 16px; }
+  #copy-body h2 {
+    font-size: 17px; margin: 22px 0 8px; color: var(--accent);
+    border-bottom: 1px solid var(--line); padding-bottom: 5px;
+  }
+  #copy-body h2.exam { color: var(--warn); }
+  #copy-body ul { margin: 0; padding-left: 22px; }
+  #copy-body li { font-size: 17px; line-height: 1.85; margin-bottom: 9px; }
+  #copy-count { color: var(--fg-dim); font-size: 13px; font-weight: 400; }
+  .checkbox {
+    margin-top: 26px; padding: 14px 16px; border-radius: 10px;
+    background: rgba(232,177,58,.08); border: 1px solid rgba(232,177,58,.4);
+  }
+  .checkbox h2 { margin-top: 0 !important; border: none !important; font-size: 15px; }
+  .checkbox li { font-size: 14px !important; line-height: 1.7 !important; }
+  .cnote { font-size: 13px; color: var(--fg-dim); margin: 10px 0 6px; }
+  .cnote.dim { font-size: 12px; margin-top: 14px; line-height: 1.6; }
+  .novel { color: var(--warn); font-size: 12px; }
+
+  /* 提示與遮罩 ---------------------------------------------------- */
+  #toast {
+    position: fixed; left: 50%; bottom: calc(var(--btn-h) + 84px);
+    transform: translateX(-50%); max-width: 88%;
+    background: #2a3039; color: var(--fg); padding: 11px 16px;
+    border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none;
+    transition: opacity .25s; z-index: 20; text-align: center;
+  }
+  #toast.show { opacity: 1; }
+  #overlay {
+    position: fixed; inset: 0; background: rgba(10,13,16,.94); z-index: 30;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 18px; padding: 28px; text-align: center;
+  }
+  #overlay.hide { display: none; }
+  #overlay h1 { margin: 0; font-size: 26px; }
+  #overlay p { margin: 0; color: var(--fg-dim); font-size: 14px; max-width: 30em; }
+  #load-error:empty { display: none; }
+  #load-error {
+    color: var(--warn); font-size: 14px; max-width: 30em; line-height: 1.6;
+    background: rgba(232,177,58,.1); border: 1px solid var(--warn);
+    border-radius: 10px; padding: 12px 14px;
+  }
+  #overlay button:disabled { opacity: .45; }
+  #overlay select, #overlay button {
+    font-size: 17px; padding: 13px 22px; border-radius: 12px;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
+  }
+  #overlay button.primary {
+    background: var(--accent); color: #06121f; border: none; font-weight: 800;
+    min-width: 220px; min-height: 60px;
+  }
+  #final, #history {
+    position: fixed; inset: 0; background: var(--bg); z-index: 40;
+    display: none; flex-direction: column;
+  }
+  #final.show, #history.show { display: flex; }
+  .bar {
+    display: flex; align-items: center; gap: 12px; flex: none;
+    padding: calc(12px + env(safe-area-inset-top)) 16px 12px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    font-weight: 600;
+  }
+  .bar .link {
+    margin-left: auto; background: none; border: none; color: var(--accent);
+    font-size: 15px; cursor: pointer; padding: 6px;
+  }
+  #detail { position: fixed; inset: 0; background: var(--bg); z-index: 46;
+    display: none; flex-direction: column; }
+  #detail.show { display: flex; }
+  #detail-body { flex: 1; overflow-y: auto; padding: 0 0 28px; }
+  .dsec { border-bottom: 1px solid var(--line); padding: 16px; }
+  .dsec h3 {
+    margin: 0 0 10px; font-size: 15px; color: var(--accent);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .dsec h3 .n { color: var(--fg-dim); font-weight: 400; font-size: 12px; }
+  .dsec audio { width: 100%; margin-top: 4px; }
+  .dsec pre {
+    margin: 0; white-space: pre-wrap; word-break: break-word;
+    font-size: 15px; line-height: 1.75; font-family: inherit;
+  }
+  .dsec .empty { color: var(--fg-dim); font-size: 14px; }
+  .dsec .dbtns { display: flex; gap: 8px; margin-top: 10px; }
+  .dsec .dbtns button {
+    flex: 1; padding: 10px; font-size: 14px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
+    cursor: pointer;
+  }
+  .dsegs { max-height: 40vh; overflow-y: auto; }
+  .dsegs .ln { display: flex; gap: 10px; margin-bottom: 7px; font-size: 14px; }
+  .dsegs .ln .t {
+    color: var(--fg-dim); font-size: 11px; flex: none; padding-top: 3px;
+    font-variant-numeric: tabular-nums;
+  }
+  #history-list { flex: 1; overflow-y: auto; padding: 8px 0; }
+  #history-list:empty::after {
+    content: "還沒有任何紀錄"; display: block; padding: 24px 16px;
+    color: var(--fg-dim); font-size: 14px; text-align: center;
+  }
+  .hrow {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    padding: 14px 16px; background: none; border: none; cursor: pointer;
+    border-bottom: 1px solid var(--line); color: var(--fg); text-align: left;
+  }
+  .hrow:active { background: var(--panel-2); }
+  .hrow .hmain { flex: 1; min-width: 0; }
+  .hrow .hcourse { font-weight: 600; font-size: 15px; }
+  .hrow .hmeta { color: var(--fg-dim); font-size: 12px; margin-top: 3px; }
+  .hrow .hbadge {
+    flex: none; font-size: 11px; padding: 3px 8px; border-radius: 999px;
+    background: var(--panel-2); color: var(--fg-dim);
+  }
+  .hrow .hbadge.done { color: var(--ok); }
+  .hitem { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); }
+  .hitem .hrow { border-bottom: none; }
+  .hdel {
+    flex: none; padding: 0 16px; background: none; border: none;
+    color: var(--bad); font-size: 14px; cursor: pointer;
+    border-left: 1px solid var(--line);
+  }
+  .hdel:active { background: rgba(232,87,74,.12); }
+  #usage {
+    flex: none; padding: 10px 16px; font-size: 12px; color: var(--fg-dim);
+    background: var(--panel-2); border-bottom: 1px solid var(--line);
+  }
+  #usage:empty { display: none; }
+  #final pre {
+    flex: 1; overflow: auto; margin: 0; padding: 16px;
+    white-space: pre-wrap; word-break: break-word; font-size: 14px;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <button id="home" title="回首頁">◀ 首頁</button>
+  <button id="hist-top" title="歷史紀錄與筆記">紀錄</button>
+  <span class="dot" id="dot" title="連線狀態"></span>
+  <span id="elapsed">00:00:00</span>
+  <span class="meta">
+    <span id="course">—</span><br>
+    <span id="health">RTF — · 佇列 — · VRAM —</span>
+  </span>
+</header>
+
+<main>
+  <div id="transcript-wrap">
+    <div id="transcript" role="log" aria-live="polite"></div>
+    <button id="to-latest">回到最新 ↓</button>
+  </div>
+  <div id="sumbar" hidden>
+    <span id="sumcount"></span>
+    <button id="sum-toggle" class="link">全部收起</button>
+  </div>
+  <div id="summaries"></div>
+</main>
+
+<footer>
+  <input id="note" placeholder="這段的註解（可留空）" enterkeyhint="done">
+  <button id="mark">即 時 整 理</button>
+  <div class="row">
+    <button id="notes" class="accent">產生筆記</button>
+    <button id="pause">暫停</button>
+    <button id="end" class="danger">結束課程</button>
+  </div>
+</footer>
+
+<div id="toast"></div>
+
+<div id="overlay">
+  <h1>課堂即時筆記</h1>
+  <select id="course-select"></select>
+  <button class="primary" id="start">開始錄音</button>
+  <p id="load-error"></p>
+  <div class="row" style="max-width:340px;width:100%">
+    <button id="retry-load">重新連線</button>
+    <button id="open-history">歷史筆記</button>
+  </div>
+  <p>
+    錄音期間請勿切換到其他 App，也不要關閉螢幕。<br>
+    這是 PWA，沒有 foreground service，切走就會斷線。<br>
+    畫面會自動保持喚醒。
+  </p>
+</div>
+
+<div id="final">
+  <header class="bar"><span id="final-title">完整筆記</span></header>
+  <pre id="final-md"></pre>
+  <footer>
+    <div class="row">
+      <button id="copy-md">複製 Markdown</button>
+      <button id="download-md">下載 .md</button>
+      <button id="final-close">關閉</button>
+      <button id="final-home">回首頁</button>
+    </div>
+  </footer>
+</div>
+
+<!-- 歷史紀錄：所有上過的課都存在資料庫裡，隨時可以叫回來看 -->
+<div id="copy-view">
+  <header class="bar">
+    <span>手抄版筆記</span><span id="copy-count"></span>
+    <button id="copy-close" class="link">關閉</button>
+  </header>
+  <div id="copy-body"></div>
+  <footer>
+    <div class="row">
+      <button id="copy-text">複製</button>
+      <button id="copy-dl-md">.md</button>
+      <button id="copy-docx">Word</button>
+      <button id="copy-refresh">重新產生</button>
+    </div>
+  </footer>
+</div>
+
+<div id="detail">
+  <header class="bar">
+    <span id="detail-title">課堂紀錄</span>
+    <button id="detail-close" class="link">關閉</button>
+  </header>
+  <div id="detail-body"></div>
+</div>
+
+<div id="history">
+  <header class="bar">
+    <span>歷史筆記</span>
+    <button id="history-close" class="link">關閉</button>
+  </header>
+  <div id="usage"></div>
+  <div id="history-list"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

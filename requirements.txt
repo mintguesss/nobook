@@ -1,0 +1,28 @@
+# 版本策略：只鎖規格 §3.1 明確指定的 faster-whisper，其餘用下限。
+# 這台機器上 fastapi/torch/numpy 等都已存在且能動，硬鎖版本只會逼出無謂的降級。
+
+# 核心服務
+fastapi>=0.115
+uvicorn[standard]>=0.32
+websockets>=13.1
+pyyaml>=6.0
+httpx>=0.27
+psutil>=6.1
+
+# 音訊 / ASR
+numpy>=1.26
+faster-whisper==1.2.1     # 規格 §3.1 指定
+silero-vad>=5.1
+soundfile>=0.13
+# torch 是 silero-vad 的依賴。CUDA 版順帶提供 faster-whisper 需要的 cuDNN 9
+# （見 server/cuda_dlls.py）；若只想要 CPU 版，另需自行安裝 cuDNN：
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install nvidia-cudnn-cu12
+
+# 文字後處理
+opencc-python-reimplemented>=0.1.7
+
+# 驗證腳本
+markdown-it-py>=3.0
+huggingface-hub>=0.21     # scripts/fetch_assets.py
+pypinyin>=0.55        # 近似音修正（server/term_fix.py）
