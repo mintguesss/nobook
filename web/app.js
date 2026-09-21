@@ -802,6 +802,67 @@ function historyRow(r, courseName) {
   return wrap;
 }
 
+// 投影片對照：把逐字稿對到教材的頁碼。
+// 涵蓋率通常不高（實測一堂 21%）——老師講投影片以外的東西、Q&A、
+// 純圖片的頁都對不上。所以這裡把涵蓋率直接寫出來，不要讓使用者
+// 以為沒列到的部分是漏掉了。
+async function renderAlign(id, d) {
+  let a = null;
+  try { a = await (await fetch(`/api/sessions/${id}/align`)).json(); } catch (e) { return; }
+  const has = a && a.pages && a.pages.length;
+  const sec = addSec('投影片對照',
+                     has ? null : '還沒對照過，或這堂沒有對到任何投影片');
+
+  const row = document.createElement('div');
+  row.className = 'row';
+  const go = document.createElement('button');
+  go.textContent = has ? '重新對照' : '對照投影片';
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    go.textContent = '對照中…';
+    try {
+      const res = await fetch(`/api/sessions/${id}/align`, { method: 'POST' });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.detail || ('HTTP ' + res.status));
+      toast(`對到 ${j.pages.length} 段、涵蓋 ${Math.round(j.coverage * 100)}%`);
+      openDetail(id, el.detailTitle.textContent.split(' · ')[0]);
+    } catch (e) {
+      toast('對照失敗：' + e.message);
+      go.disabled = false;
+      go.textContent = has ? '重新對照' : '對照投影片';
+    }
+  });
+  row.appendChild(go);
+  sec.appendChild(row);
+  if (!has) return;
+
+  const note = document.createElement('p');
+  note.className = 'cnote';
+  note.textContent =
+    `涵蓋 ${Math.round(a.coverage * 100)}%（${a.matched}/${a.chunks} 段）。` +
+    '沒列到的時間是老師講投影片以外的內容，或那幾頁只有圖。';
+  sec.appendChild(note);
+
+  for (const m of a.materials || []) {
+    const h = document.createElement('div');
+    h.className = 'sechead';
+    h.textContent = `${m.material}（${m.pages} 頁）`;
+    sec.appendChild(h);
+    const ul = document.createElement('ul');
+    ul.className = 'plist';
+    for (const e of a.pages.filter((x) => x.material_id === m.id)) {
+      const li = document.createElement('li');
+      li.innerHTML = '<button class="pjump"></button><span class="pt"></span>';
+      li.querySelector('.pjump').textContent = 'p' + e.page;
+      li.querySelector('.pt').textContent =
+        `${fmt(e.start_s)}–${fmt(e.end_s)}　${e.score.toFixed(2)}`;
+      li.querySelector('.pjump').addEventListener('click', () => jumpTo(e.start_s));
+      ul.appendChild(li);
+    }
+    sec.appendChild(ul);
+  }
+}
+
 // 版本號。手機／平板的 Service Worker 沒更新時，畫面看起來跟舊版一模一樣，
 // 沒有這個就只能猜。對不上就是快取還沒換掉。
 async function showBuild() {
@@ -945,6 +1006,9 @@ async function openDetail(id, courseName) {
     });
     sec.appendChild(b);
   }
+
+  // 1.8 投影片對照
+  await renderAlign(id, d);
 
   // 2. 課中整理：每次按「即時整理」產生的段落
   const secWrap = addSec(`課中整理`, d.sections.length ? null : '這堂課沒有按過即時整理',

@@ -196,6 +196,57 @@ async def _finish_from_db(session_id: str, s: dict) -> dict:
             "recovered_chars": sum(len(g["text"]) for g in tail)}
 
 
+@app.get("/api/materials")
+async def api_materials():
+    """教材資料夾裡有哪些投影片。"""
+    from . import materials
+    return {"dir": str(config.MATERIALS_DIR),
+            "files": materials.list_materials()}
+
+
+@app.post("/api/sessions/{session_id}/align")
+async def api_align(session_id: str):
+    """把這堂課的逐字稿對到投影片的頁碼。
+
+    純 CPU，不用模型，一堂課一兩秒。結果存在 session 上，之後直接讀。
+    """
+    from . import materials
+    s = storage.get_session(session_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    segs = storage.list_segments(session_id)
+    if not segs:
+        raise HTTPException(status_code=400, detail="這堂沒有逐字稿")
+    if not materials.list_materials():
+        raise HTTPException(
+            status_code=400,
+            detail="教材資料夾是空的：把投影片放到 %s" % config.MATERIALS_DIR)
+
+    res = await asyncio.to_thread(materials.align_all, segs)
+    payload = {
+        "coverage": res["coverage"],
+        "matched": res["matched"],
+        "chunks": len(res["chunks"]),
+        "materials": res["materials"],
+        "pages": materials.page_ranges(res),
+    }
+    storage.set_alignment(session_id, payload)
+    return payload
+
+
+@app.get("/api/sessions/{session_id}/align")
+async def api_align_get(session_id: str):
+    if storage.get_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return storage.get_alignment(session_id) or {}
+
+
+@app.delete("/api/sessions/{session_id}/align")
+async def api_align_clear(session_id: str):
+    storage.set_alignment(session_id, None)
+    return {"ok": True}
+
+
 @app.get("/api/merge/groups")
 async def api_merge_groups():
     """可以合併的組：同一天、同一門課、兩筆以上。"""
@@ -263,11 +314,13 @@ def _notes_markdown(s, session_id, which: str) -> str:
             return md
     md = s.get("final_md")
     if md and which == "full":
-        return md
+        # 完整版是課後整理時存下來的，那時還沒對照投影片，所以頁碼要後補
+        return export.annotate_slides(md, storage.get_alignment(session_id))
     course = courses.get_course(s["course_id"])
     return export.build_markdown(
         course, s, storage.list_sections(session_id),
-        {"overview": ["（本堂尚未執行課後整理）"], "open_questions": []})
+        {"overview": ["（本堂尚未執行課後整理）"], "open_questions": []},
+        align=storage.get_alignment(session_id))
 
 
 def _filename(s, which: str, ext: str) -> str:

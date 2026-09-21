@@ -555,6 +555,23 @@ def test_materials(gate):
     gate.check(len(a3) == len(chunks), "沒有文字的投影片頁不會讓對齊崩潰")
     gate.check(M.align([], chunks) == ([], []), "沒有投影片時回傳空結果")
 
+    # 把頁碼補進已經存好的筆記（完整版在對照之前就寫進資料庫了）
+    nl = chr(10)
+    md = nl.join(["# 課", "", "### 甲段 `[00:17:25]`", "- x", "",
+                  "### 乙段 `[00:30:00]`", "- y", ""])
+    align = {"pages": [
+        {"material": "a.pdf", "material_id": "a", "page": 5,
+         "start_s": 1154, "end_s": 1540, "score": 0.43},
+        {"material": "a.pdf", "material_id": "a", "page": 8,
+         "start_s": 1814, "end_s": 1845, "score": 0.57}]}
+    out = export.annotate_slides(md, align)
+    gate.check("投影片 p5" in out and "投影片 p8" in out,
+               "頁碼照時間戳補進既有的筆記")
+    gate.check(export.annotate_slides(md, None) == md,
+               "沒有對齊資料時筆記原樣不動")
+    gate.check(export.annotate_slides(out, align) == out,
+               "重複匯出不會把頁碼疊加兩次")
+
 
 # ── 儲存層（規格 §10）─────────────────────────────────────────────────
 def test_storage(gate):

@@ -255,6 +255,91 @@ def align_material(pages, segments, threshold: float = MATCH_THRESHOLD):
     }
 
 
+# 換教材的代價。老師不會每分鐘在兩份投影片之間跳來跳去——他會講完一份
+# 再換下一份。各自獨立對齊再挑最高分的話，結果會像這樣：
+#   p33(Evolution) → p18(SDG) → p33(Evolution) → p40(SDG) → p35(Evolution)
+# 每一段單看都合理，合起來不是人類的行為。加一個切換成本，要有足夠的
+# 證據才換。0.5 大約等於一次強匹配的分數。
+SWITCH_COST = 0.5
+
+
+def _joint_align(mats, chunks, threshold):
+    """跨教材的聯合單調對齊。
+
+    狀態是 (第幾份教材, 第幾頁)。同一份內頁碼不回頭、換份要付 SWITCH_COST。
+    """
+    states = []          # [(mat_index, page_number, feature)]
+    metas = []
+    for mi, (m, pages) in enumerate(mats):
+        pf = [features(t) for _, t in pages]
+        idf = idf_of(pf)
+        sizes = sorted(sum(f.values()) for f in pf) or [1]
+        typical = sizes[len(sizes) // 2] or 1
+        damps = [length_damp(f, typical) for f in pf]
+        metas.append((m, pages, pf, idf, damps))
+        for pi, (num, _) in enumerate(pages):
+            states.append((mi, pi, num))
+
+    cf = [features(c["text"]) for c in chunks]
+    M, K = len(chunks), len(states)
+    if not K or not M:
+        return [None] * M
+
+    gain = []
+    for i in range(M):
+        row = []
+        for mi, pi, _num in states:
+            _m, _pg, pf, idf, damps = metas[mi]
+            sc = similarity(pf[pi], cf[i], idf, damps[pi])
+            row.append((max(sc - threshold, 0.0), sc))
+        gain.append(row)
+
+    NEG = float("-inf")
+    dp = [[NEG] * K for _ in range(M)]
+    bk = [[-1] * K for _ in range(M)]
+    for k in range(K):
+        dp[0][k] = gain[0][k][0]
+    for i in range(1, M):
+        # 同一份教材內的前綴最大值（頁碼不回頭）
+        pref = {}
+        pref_arg = {}
+        best_any, best_any_arg = NEG, -1
+        for k, (mi, pi, _n) in enumerate(states):
+            v = dp[i - 1][k]
+            if v > best_any:
+                best_any, best_any_arg = v, k
+        for k, (mi, pi, _n) in enumerate(states):
+            cur = pref.get(mi, NEG)
+            arg = pref_arg.get(mi, -1)
+            if dp[i - 1][k] > cur:
+                cur, arg = dp[i - 1][k], k
+            pref[mi], pref_arg[mi] = cur, arg
+            stay, stay_arg = cur, arg
+            jump = best_any - SWITCH_COST
+            if jump > stay:
+                stay, stay_arg = jump, best_any_arg
+            dp[i][k] = stay + gain[i][k][0]
+            bk[i][k] = stay_arg
+
+    k = max(range(K), key=lambda x: dp[M - 1][x])
+    path = [0] * M
+    for i in range(M - 1, -1, -1):
+        path[i] = k
+        k = bk[i][k] if bk[i][k] >= 0 else k
+
+    picks = []
+    for i, k in enumerate(path):
+        mi, pi, num = states[k]
+        g, sc = gain[i][k]
+        if g <= 0:
+            picks.append(None)
+            continue
+        m = metas[mi][0]
+        picks.append({"material": m["name"], "material_id": m["id"],
+                      "page": num, "score": round(sc, 3)})
+    return picks
+
+
 def align_all(segments, materials_dir=None, threshold=MATCH_THRESHOLD):
     """把逐字稿對到「所有教材的所有頁」，回傳每一塊的歸屬。
 
@@ -276,21 +361,7 @@ def align_all(segments, materials_dir=None, threshold=MATCH_THRESHOLD):
     if not mats or not chunks:
         return {"chunks": chunks, "picks": [None] * len(chunks), "materials": []}
 
-    per_mat = []
-    for m, pages in mats:
-        assigned, scores = align(pages, chunks, threshold)
-        per_mat.append((m, assigned, scores))
-
-    picks = []
-    for i in range(len(chunks)):
-        best = None
-        for m, assigned, scores in per_mat:
-            if assigned[i] is None:
-                continue
-            if best is None or scores[i] > best["score"]:
-                best = {"material": m["name"], "material_id": m["id"],
-                        "page": assigned[i], "score": round(scores[i], 3)}
-        picks.append(best)
+    picks = _joint_align(mats, chunks, threshold)
 
     used = {}
     for ch, pk in zip(chunks, picks):
@@ -316,6 +387,47 @@ def align_all(segments, materials_dir=None, threshold=MATCH_THRESHOLD):
     return {"chunks": chunks, "picks": picks, "materials": summary,
             "matched": sum(1 for p in picks if p),
             "coverage": round(sum(1 for p in picks if p) / len(chunks), 3)}
+
+
+def page_ranges(result):
+    """把 align_all 的結果整理成「每一頁對到哪一段時間」，照時間排序。
+
+    連續對到同一頁的塊會合併成一段；老師翻回去再講同一頁時會是另一段，
+    不要硬併——那兩次講的東西通常不一樣。
+    """
+    out = []
+    cur = None
+    for ch, pk in zip(result["chunks"], result["picks"]):
+        if not pk:
+            cur = None
+            continue
+        key = (pk["material_id"], pk["page"])
+        if cur and cur["_key"] == key:
+            cur["end_s"] = ch["end_s"]
+            cur["_n"] += 1
+            cur["_sum"] += pk["score"]
+            continue
+        cur = {"_key": key, "_n": 1, "_sum": pk["score"],
+               "material": pk["material"], "material_id": pk["material_id"],
+               "page": pk["page"], "start_s": ch["start_s"], "end_s": ch["end_s"]}
+        out.append(cur)
+    for e in out:
+        e["score"] = round(e["_sum"] / e["_n"], 3)
+        e["chunks"] = e["_n"]
+        del e["_key"], e["_n"], e["_sum"]
+    return out
+
+
+def pages_for_span(ranges, start_s, end_s):
+    """這段時間涵蓋到哪幾頁投影片。給筆記標頁碼用。"""
+    hit = []
+    for e in ranges or []:
+        if e["end_s"] > start_s and e["start_s"] < end_s:
+            hit.append(e)
+    by_mat = {}
+    for e in hit:
+        by_mat.setdefault(e["material"], set()).add(e["page"])
+    return [{"material": m, "pages": sorted(ps)} for m, ps in by_mat.items()]
 
 
 def best_material(segments, materials_dir=None, threshold=MATCH_THRESHOLD):

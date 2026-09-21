@@ -98,6 +98,15 @@
   .batch[open] > summary::before { content: '▾'; }
   .batch .bmeta { font-weight: 400; font-size: 12px; opacity: .6; }
   .batch .bbody { padding: 0 6px 6px; }
+  .plist { list-style: none; margin: 4px 0 0; padding: 0; }
+  .plist li { display: flex; align-items: baseline; gap: 10px; padding: 3px 0; }
+  .pjump {
+    flex: none; min-width: 46px; padding: 2px 8px; border-radius: 6px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--accent); font-size: 12px; cursor: pointer;
+  }
+  .plist .pt { color: var(--fg-dim); font-size: 12px; }
+
   /* 課程資料夾：一門課上十八週，平鋪的清單找不到東西 */
   .cfold { border-bottom: 1px solid var(--line); }
   .cfold > summary {

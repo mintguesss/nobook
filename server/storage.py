@@ -73,6 +73,8 @@ def init(db_path=None) -> None:
         # list_sections 會把只有 bullets 的舊紀錄包成單一無標題的組
         _migrate(cur, "sections", "summary", "TEXT")
         _migrate(cur, "sections", "groups", "TEXT")
+        # 投影片對齊的結果（哪一份教材、哪幾頁、對到哪段時間）
+        _migrate(cur, "sessions", "align_json", "TEXT")
         cur.close()
         _conn.commit()
 
@@ -250,6 +252,23 @@ def list_sections(session_id: str):
             r["groups"] = [{"heading": "", "points": r["bullets"]}]
         r["summary"] = r.get("summary") or ""
     return rows
+
+
+def set_alignment(session_id: str, payload) -> None:
+    with _cursor() as cur:
+        cur.execute("UPDATE sessions SET align_json=? WHERE id=?",
+                    (json.dumps(payload, ensure_ascii=False) if payload else None,
+                     session_id))
+
+
+def get_alignment(session_id: str):
+    s = get_session(session_id)
+    if not s or not s.get("align_json"):
+        return None
+    try:
+        return json.loads(s["align_json"])
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
 def update_segment_text(seg_id: int, text: str) -> None:
