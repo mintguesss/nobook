@@ -75,6 +75,9 @@ def init(db_path=None) -> None:
         _migrate(cur, "sections", "groups", "TEXT")
         # 投影片對齊的結果（哪一份教材、哪幾頁、對到哪段時間）
         _migrate(cur, "sessions", "align_json", "TEXT")
+        # 合併產生的紀錄記下來源 id（JSON 陣列）。沒有這個欄位的話，
+        # 合併結果跟來源同一天同一門課，會被當成「還可以再合併一次」。
+        _migrate(cur, "sessions", "merged_from", "TEXT")
         cur.close()
         _conn.commit()
 
@@ -129,6 +132,13 @@ def _migrate(cur, table, column, decl):
         cur.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, decl))
 
 
+def set_merged_from(session_id: str, source_ids) -> None:
+    """記下這筆是由哪幾堂合併來的。"""
+    with _cursor() as cur:
+        cur.execute("UPDATE sessions SET merged_from=? WHERE id=?",
+                    (json.dumps(list(source_ids)), session_id))
+
+
 def get_session(session_id: str):
     with _cursor() as cur:
         cur.execute("SELECT * FROM sessions WHERE id=?", (session_id,))
@@ -139,8 +149,8 @@ def get_session(session_id: str):
 def list_sessions(limit: int = 100):
     with _cursor() as cur:
         cur.execute(
-            "SELECT id, course_id, started_at, ended_at, duration_s "
-            "FROM sessions ORDER BY started_at DESC LIMIT ?",
+            "SELECT id, course_id, started_at, ended_at, duration_s, "
+            "merged_from FROM sessions ORDER BY started_at DESC LIMIT ?",
             (limit,),
         )
         return [dict(r) for r in cur.fetchall()]

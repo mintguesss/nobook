@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -76,6 +77,7 @@ def concat_audio(rows, out_id: str, course=None):
     # 合併檔的起始時間跟來源第一段一樣，不加後綴就會撞名
     out_path = audio_store.build_filename(course, rows[0]["started_at"],
                                           out_id, out_dir, suffix="合併")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     gap = np.zeros(int(GAP_S * config.SAMPLE_RATE), dtype="int16")
     offsets = {}
     written = 0
@@ -179,6 +181,7 @@ async def merge_sessions(ids, summarizer) -> dict:
     final_md = export.build_markdown(course, row, sections, final)
     storage.finish_session(new_id, rows[-1]["ended_at"] or rows[-1]["started_at"],
                            total, final_md, handcopy_md, audio_path)
+    storage.set_merged_from(new_id, [r["id"] for r in rows])
 
     return {"id": new_id, "course_id": course.id, "merged_from": [r["id"] for r in rows],
             "segments": n_seg, "chars": len(text), "sections": len(sections),
@@ -187,14 +190,27 @@ async def merge_sessions(ids, summarizer) -> dict:
 
 
 def mergeable_groups(limit: int = 200):
-    """找出可以合併的組：同一天、同一門課、兩筆以上。"""
+    """找出可以合併的組：同一天、同一門課、兩筆以上。
+
+    合併結果跟它的來源同一天、同一門課，所以要把已經合併過的排掉，
+    否則合併完那一組還留在清單上，再按一次會把合併結果再合併進去。
+    """
     groups = {}
+    done = set()      # 已經被合併掉的來源組合
     for r in storage.list_sessions(limit):
+        if r.get("merged_from"):
+            try:
+                done.add(frozenset(json.loads(r["merged_from"])))
+            except (TypeError, ValueError):
+                pass
+            continue      # 合併結果本身不是合併素材
         key = (r["course_id"], (r["started_at"] or "")[:10])
         groups.setdefault(key, []).append(r)
     out = []
     for (cid, day), rows in groups.items():
         if len(rows) < 2:
+            continue
+        if frozenset(r["id"] for r in rows) in done:
             continue
         rows.sort(key=lambda r: r["started_at"])
         out.append({"course_id": cid, "date": day,
