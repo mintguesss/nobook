@@ -729,48 +729,77 @@ async function openHistory() {
 
   await renderMergeGroups(courses);
 
+  // 照課名分資料夾。一門課上十八週就是十八筆，平鋪的話找上禮拜那堂
+  // 要滑很久；而且同一門課的紀錄本來就該放在一起看。
+  const byCourse = new Map();
   for (const r of rows) {
-    const btn = document.createElement('button');
-    btn.className = 'hrow';
-    const started = new Date(r.started_at);
-    const dur = r.duration_s ? `${Math.round(r.duration_s / 60)} 分鐘` : '未完成';
-    const done = !!r.ended_at;
-    btn.innerHTML =
-      '<span class="hmain"><span class="hcourse"></span>' +
-      '<span class="hmeta"></span></span>' +
-      `<span class="hbadge${done ? ' done' : ''}"></span>`;
-    btn.querySelector('.hcourse').textContent = courses.get(r.course_id) || r.course_id;
-    btn.querySelector('.hmeta').textContent =
-      `${started.toLocaleString('zh-TW', { dateStyle: 'short', timeStyle: 'short' })} · ${dur}`;
-    btn.querySelector('.hbadge').textContent = done ? '已完成' : '未結束';
-    btn.addEventListener('click', () => openDetail(r.id, courses.get(r.course_id) || r.course_id));
-
-    const live = state.running && !state.ended && r.id === state.sessionId;
-    if (live) btn.querySelector('.hbadge').textContent = '錄音中';
-
-    const del = document.createElement('button');
-    del.className = 'hdel';
-    del.textContent = '刪除';
-    del.disabled = live;          // 正在錄的那堂不給刪
-    del.addEventListener('click', async (ev) => {
-      ev.stopPropagation();
-      const name = courses.get(r.course_id) || r.course_id;
-      if (!confirm(`刪除「${name} ${started.toLocaleDateString('zh-TW')}」？
-逐字稿、摘要、錄音都會一起刪掉，無法復原。`)) return;
-      try {
-        const res = await fetch(`/api/sessions/${r.id}`, { method: 'DELETE' });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        toast('已刪除');
-        openHistory();
-      } catch (e) { toast('刪除失敗：' + e.message); }
-    });
-
-    const wrap = document.createElement('div');
-    wrap.className = 'hitem';
-    wrap.appendChild(btn);
-    wrap.appendChild(del);
-    el.historyList.appendChild(wrap);
+    const name = courses.get(r.course_id) || r.course_id;
+    if (!byCourse.has(name)) byCourse.set(name, []);
+    byCourse.get(name).push(r);
   }
+  // 最近上過的課排前面
+  const order = [...byCourse.entries()].sort(
+    (a, b) => (b[1][0].started_at || '').localeCompare(a[1][0].started_at || ''));
+
+  for (const [name, list] of order) {
+    const box = document.createElement('details');
+    box.className = 'cfold';
+    box.innerHTML = '<summary><span class="cname"></span>' +
+                    '<span class="cmeta"></span></summary>';
+    box.querySelector('.cname').textContent = name;
+    const latest = new Date(list[0].started_at);
+    box.querySelector('.cmeta').textContent =
+      `${list.length} 堂 · 最近 ` +
+      latest.toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
+    // 有沒結束的課就自動展開，那是使用者現在需要處理的
+    if (list.some((r) => !r.ended_at)) box.open = true;
+
+    for (const r of list) box.appendChild(historyRow(r, name));
+    el.historyList.appendChild(box);
+  }
+}
+
+// 一列紀錄。課名已經在資料夾標題上，這裡只寫日期時間與長度。
+function historyRow(r, courseName) {
+  const btn = document.createElement('button');
+  btn.className = 'hrow';
+  const started = new Date(r.started_at);
+  const dur = r.duration_s ? `${Math.round(r.duration_s / 60)} 分鐘` : '未完成';
+  const done = !!r.ended_at;
+  btn.innerHTML =
+    '<span class="hmain"><span class="hcourse"></span>' +
+    '<span class="hmeta"></span></span>' +
+    `<span class="hbadge${done ? ' done' : ''}"></span>`;
+  btn.querySelector('.hcourse').textContent =
+    started.toLocaleString('zh-TW', { dateStyle: 'short', timeStyle: 'short' });
+  btn.querySelector('.hmeta').textContent = dur;
+  btn.querySelector('.hbadge').textContent = done ? '已完成' : '未結束';
+  btn.addEventListener('click', () => openDetail(r.id, courseName));
+
+  const live = state.running && !state.ended && r.id === state.sessionId;
+  if (live) btn.querySelector('.hbadge').textContent = '錄音中';
+
+  const del = document.createElement('button');
+  del.className = 'hdel';
+  del.textContent = '刪除';
+  del.disabled = live;          // 正在錄的那堂不給刪
+  del.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    if (!confirm(`刪除「${courseName} ${started.toLocaleDateString('zh-TW')}」？
+逐字稿、摘要、錄音都會一起刪掉，無法復原。`)) return;
+    try {
+      const res = await fetch(`/api/sessions/${r.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      toast('已刪除');
+      openHistory();
+    } catch (e) { toast('刪除失敗：' + e.message); }
+  });
+
+  const wrap = document.createElement('div');
+  wrap.className = 'hitem';
+  wrap.appendChild(btn);
+  wrap.appendChild(del);
+  return wrap;
 }
 
 // 版本號。手機／平板的 Service Worker 沒更新時，畫面看起來跟舊版一模一樣，

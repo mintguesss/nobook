@@ -98,6 +98,27 @@
   .batch[open] > summary::before { content: '▾'; }
   .batch .bmeta { font-weight: 400; font-size: 12px; opacity: .6; }
   .batch .bbody { padding: 0 6px 6px; }
+  /* 課程資料夾：一門課上十八週，平鋪的清單找不到東西 */
+  .cfold { border-bottom: 1px solid var(--line); }
+  .cfold > summary {
+    display: flex; align-items: baseline; gap: 10px; cursor: pointer;
+    padding: 14px 16px; list-style: none; font-weight: 600;
+  }
+  .cfold > summary::-webkit-details-marker { display: none; }
+  .cfold > summary::before {
+    content: '▸'; color: var(--fg-dim); font-weight: 400;
+    transition: transform .12s;
+  }
+  .cfold[open] > summary::before { content: '▾'; }
+  .cfold > summary:active { background: var(--panel-2); }
+  .cfold .cmeta {
+    margin-left: auto; font-size: 12px; color: var(--fg-dim); font-weight: 400;
+  }
+  .cfold .hitem { border-bottom: none; background: var(--panel); }
+  .cfold .hitem + .hitem { border-top: 1px solid var(--line); }
+  .cfold .hrow { padding-left: 30px; }
+  .cfold .hcourse { font-weight: 500; font-size: 14px; }
+
   /* 合併區塊：沿用歷史列的視覺語言（同樣的列高、同樣的分隔線），
      只用左側一條強調色標示它是動作區，不要做成另一種卡片。 */
   .mergebox { border-bottom: 1px solid var(--line); }
