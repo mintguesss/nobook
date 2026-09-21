@@ -245,7 +245,7 @@ async def api_align(session_id: str):
         raise HTTPException(
             status_code=400,
             detail=r"這門課還沒有教材。把投影片放到 %s\%s\ 底下"
-                   % (config.MATERIALS_DIR, course.id))
+                   % (config.MATERIALS_DIR, course.name or course.id))
 
     res = await asyncio.to_thread(materials.align_all, segs, None,
                                   materials.MATCH_THRESHOLD, course)

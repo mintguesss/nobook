@@ -4,9 +4,9 @@
 
 ```
 materials/
-├── pom-2026/          ← 課程代號（courses/*.yaml 的 id）
+├── 生產與作業管理/      ← 課名（courses/*.yaml 的 name）
 │   └── week1.pdf
-└── 企業電腦網路/        ← 或直接用課名，兩個都認
+└── pom-2026/          ← 或用課程代號，兩個都認
     └── week1.pptx
 ```
 
