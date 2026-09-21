@@ -1,4 +1,4 @@
-/* Service Worker：只快取靜態資源。
+﻿/* Service Worker：只快取靜態資源。
  * 規格 §8.2：不要攔截 WebSocket 或 API 請求。
  *
  * 策略是 network-first（先連線、失敗才用快取），不是 cache-first。
@@ -6,7 +6,7 @@
  * 頁面會一直跑舊的 app.js，而且外觀上完全看不出來。
  * 快取的角色只是「伺服器連不上時還能開啟頁面」的備援。
  */
-const VERSION = 'v19';
+const VERSION = 'v20';
 const CACHE = 'nobook-' + VERSION;
 const ASSETS = [
   './', 'index.html', 'app.js', 'recorder-worklet.js',

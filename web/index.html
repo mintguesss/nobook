@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
@@ -374,9 +374,14 @@
     border-bottom: 1px solid var(--line); color: var(--fg); text-align: left;
   }
   .hrow:active { background: var(--panel-2); }
-  .hrow .hmain { flex: 1; min-width: 0; }
+  /* 時間與時長要分行。兩個都是 span，不撐開成 flex 的話會直接並排黏在一起，
+     .hmeta 的 margin-top 對行內元素也不會生效。 */
+  .hrow .hmain {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column; gap: 3px;
+  }
   .hrow .hcourse { font-weight: 600; font-size: 15px; }
-  .hrow .hmeta { color: var(--fg-dim); font-size: 12px; margin-top: 3px; }
+  .hrow .hmeta { color: var(--fg-dim); font-size: 12px; }
   .hrow .hbadge {
     flex: none; font-size: 11px; padding: 3px 8px; border-radius: 999px;
     background: var(--panel-2); color: var(--fg-dim);
@@ -508,6 +513,6 @@
 <!-- ?v= 是必要的：index.html 和 app.js 會被各自快取，版本對不上時
      畫面上看得到新按鈕、但監聽器在舊檔裡，按了完全沒反應。
      這個字串要跟 sw.js 的 VERSION 一致，selftest 會檢查。 -->
-<script src="app.js?v=v19"></script>
+<script src="app.js?v=v20"></script>
 </body>
 </html>
