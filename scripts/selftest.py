@@ -11,6 +11,7 @@ import asyncio
 import json
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -505,6 +506,56 @@ def test_worksheet(gate):
                "一般手抄版不受學習單的編號影響")
 
 
+# ── 投影片對齊 ────────────────────────────────────────────────────────
+def test_materials(gate):
+    """把上課用的投影片對到逐字稿的時間軸。"""
+    from server import materials as M
+
+    pages = [
+        (1, "課程大綱 本學期進度與評分方式 期中報告 期末報告"),
+        (2, "供應鏈的定義 供應商 製造商 配銷商 零售商 終端顧客 上游 下游"),
+        (3, "長鞭效應 需求資訊在供應鏈上游被逐級放大 安全庫存 前置時間"),
+        (4, "SCOR 模型 計畫 採購 製造 配送 退貨 五大流程"),
+    ]
+    chunks = [
+        {"start_s": 0.0, "end_s": 60.0,
+         "text": "我們先看這學期的進度跟評分方式期中報告佔多少期末報告佔多少"},
+        {"start_s": 60.0, "end_s": 120.0,
+         "text": "供應鏈就是從供應商到製造商到配銷商到零售商最後到終端顧客"},
+        {"start_s": 120.0, "end_s": 180.0,
+         "text": "長鞭效應就是需求資訊往上游走的時候會被逐級放大安全庫存跟前置時間都有關係"},
+        {"start_s": 180.0, "end_s": 240.0,
+         "text": "那個誰昨天問我停車證的事情等一下下課再說"},
+        {"start_s": 240.0, "end_s": 300.0,
+         "text": "SCOR 模型有五大流程計畫採購製造配送跟退貨"},
+    ]
+    assigned, scores = M.align(pages, chunks)
+    gate.check(assigned[:3] == [1, 2, 3] and assigned[4] == 4,
+               "逐字稿對到正確的投影片頁碼", str(assigned))
+    gate.check(assigned[3] is None,
+               "跟投影片無關的閒聊標成沒有對應（不硬塞到某一頁）",
+               "第 4 塊 → %s" % assigned[3])
+    nums = [a for a in assigned if a]
+    gate.check(nums == sorted(nums), "頁碼單調遞增，不會往回跳", str(nums))
+
+    # 一整篇文章貼上去的投影片會跟任何東西都像，要被長度阻尼壓下來
+    fat = pages + [(5, "其他 " + " ".join(
+        ["供應鏈 需求 庫存 流程 顧客 製造 配送 採購 計畫 退貨"] * 40))]
+    a2, _ = M.align(fat, chunks)
+    gate.check(sum(1 for x in a2 if x == 5) <= 1,
+               "超長的投影片不會一頁吃掉整堂課",
+               "第 5 頁吃到 %d 塊" % sum(1 for x in a2 if x == 5))
+
+    gate.check(M.length_damp(Counter({"a": 100}), 10) < 0.5
+               and M.length_damp(Counter({"a": 5}), 10) == 1.0,
+               "長度阻尼只罰過長的頁，正常長度不受影響")
+
+    # 抽不出文字的頁（純圖、掃描檔）不能讓整個流程炸掉
+    a3, _ = M.align([(1, ""), (2, "供應鏈 長鞭效應")], chunks)
+    gate.check(len(a3) == len(chunks), "沒有文字的投影片頁不會讓對齊崩潰")
+    gate.check(M.align([], chunks) == ([], []), "沒有投影片時回傳空結果")
+
+
 # ── 儲存層（規格 §10）─────────────────────────────────────────────────
 def test_storage(gate):
     with tempfile.TemporaryDirectory() as d:
@@ -624,6 +675,7 @@ def main() -> int:
     print("\n[Markdown 匯出 §6.4]")
     test_export(gate)
     print("\n[SQLite 儲存 §10]")
+    test_materials(gate)
     test_worksheet(gate)
     test_storage(gate)
     print("\n[課程設定檔 §9.3]")

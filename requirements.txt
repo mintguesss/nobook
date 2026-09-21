@@ -26,3 +26,5 @@ opencc-python-reimplemented>=0.1.7
 markdown-it-py>=3.0
 huggingface-hub>=0.21     # scripts/fetch_assets.py
 pypinyin>=0.55        # 近似音修正（server/term_fix.py）
+pypdf
+python-pptx

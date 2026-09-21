@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 MODELS_DIR = ROOT / "models"
 COURSES_DIR = ROOT / "courses"
+# 上課用的投影片／講義丟這裡，系統自己去對應是哪一堂、對到第幾頁
+MATERIALS_DIR = Path(os.getenv("LS_MATERIALS_DIR", ROOT / "materials"))
 WEB_DIR = ROOT / "web"
 BENCH_PATH = DATA_DIR / "bench.json"
 DB_PATH = Path(os.getenv("LS_DB_PATH", DATA_DIR / "lecture.db"))
