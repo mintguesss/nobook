@@ -22,6 +22,9 @@ soundfile>=0.13
 # 文字後處理
 opencc-python-reimplemented>=0.1.7
 
+# 匯出
+python-docx              # Word 匯出（server/docx_export.py）
+
 # 驗證腳本
 markdown-it-py>=3.0
 huggingface-hub>=0.21     # scripts/fetch_assets.py
