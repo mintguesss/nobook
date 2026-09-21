@@ -1,4 +1,4 @@
-# lecture-scribe — 課堂即時轉錄與筆記系統
+# nobook — 課堂即時轉錄與筆記系統
 
 手機或平板當錄音端，自己的筆電當推論伺服器，兩邊用 Tailscale 連。
 逐字稿、段落摘要、下課要交的手抄筆記全部在本地 GPU 上算完，
@@ -387,7 +387,7 @@ handcopy:
 ## 專案結構
 
 ```
-lecture-scribe/
+nobook/
 ├── server/
 │   ├── main.py              FastAPI app、路由註冊
 │   ├── ws_session.py        WebSocket 連線處理與 session 狀態機

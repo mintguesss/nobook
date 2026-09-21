@@ -19,7 +19,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
 )
-log = logging.getLogger("lecture-scribe")
+log = logging.getLogger("nobook")
 
 state = {"engine": None, "llm": None, "summarizer": None, "bench": None}
 
