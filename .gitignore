@@ -39,9 +39,13 @@ Thumbs.db
 .env.*
 
 # ── 教材：老師的投影片，不是我的東西 ──────────────────────────────
+# 課程資料夾的「結構」進版控（clone 下來就有地方放），裡面的檔案不進。
 materials/*
 !materials/.gitkeep
 !materials/README.md
+!materials/*/
+materials/*/*
+!materials/*/.gitkeep
 
 # ── 搬家包：裡面是實際的錄音與逐字稿，只用隨身碟／OneDrive 傳 ────────
 搬家包/
