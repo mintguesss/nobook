@@ -1094,18 +1094,24 @@ async function openDetail(id, courseName) {
                            + '接不回去了，只能收尾',
                        null, true);
 
+    // 這兩顆要用詳細頁自己的按鈕樣式（.dbtns）。之前掛的是 .primary，
+    // 但那個只在 #overlay 底下有定義，在這裡等於完全沒樣式。
+    const bar = document.createElement('div');
+    bar.className = 'dbtns';
+    sec.appendChild(bar);
+
     // 手機睡著、網路斷掉之後回來，多半是想把剩下的課錄完，不是想結束。
     // session 還在伺服器的重連佇列裡就接得回去。
     if (d.resumable) {
       const r = document.createElement('button');
-      r.className = 'primary';
+      r.className = 'act';
       r.textContent = '接續錄音';
       r.addEventListener('click', () => resumeSession(d));
-      sec.appendChild(r);
+      bar.appendChild(r);
     }
 
     const b = document.createElement('button');
-    b.className = d.resumable ? '' : 'primary';
+    if (!d.resumable) b.className = 'act';
     b.textContent = '結束並產生筆記';
     b.addEventListener('click', async () => {
       b.disabled = true;
@@ -1122,7 +1128,7 @@ async function openDetail(id, courseName) {
         b.textContent = '結束並產生筆記';
       }
     });
-    sec.appendChild(b);
+    bar.appendChild(b);
   }
 
   // 1.8 投影片對照。包 try：任何一節出錯都不該讓後面的筆記整個不渲染

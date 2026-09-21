@@ -345,7 +345,13 @@
     font-size: 15px; line-height: 1.75; font-family: inherit;
   }
   .dsec .empty { color: var(--fg-dim); font-size: 14px; }
-  .dsec .dbtns { display: flex; gap: 8px; margin-top: 10px; }
+  .dsec .dbtns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  /* 主要動作：這一節只有一個「該按的」，其餘保持外框樣式 */
+  .dsec .dbtns button.act {
+    background: var(--accent); color: #06121f; border-color: var(--accent);
+    font-weight: 700;
+  }
+  .dsec .dbtns button:disabled { opacity: .55; }
   .dsec .dbtns button {
     flex: 1; padding: 10px; font-size: 14px; border-radius: 8px;
     border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
@@ -502,6 +508,6 @@
 <!-- ?v= 是必要的：index.html 和 app.js 會被各自快取，版本對不上時
      畫面上看得到新按鈕、但監聽器在舊檔裡，按了完全沒反應。
      這個字串要跟 sw.js 的 VERSION 一致，selftest 會檢查。 -->
-<script src="app.js?v=v18"></script>
+<script src="app.js?v=v19"></script>
 </body>
 </html>
