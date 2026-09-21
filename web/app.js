@@ -772,7 +772,11 @@ function historyRow(r, courseName) {
   const btn = document.createElement('button');
   btn.className = 'hrow';
   const started = new Date(r.started_at);
-  const dur = r.duration_s ? `${Math.round(r.duration_s / 60)} 分鐘` : '未完成';
+  let dur = r.duration_s ? `${Math.round(r.duration_s / 60)} 分鐘` : '未完成';
+  // 合併結果沿用來源第一段的起始時間，不標出來的話跟來源長得一模一樣
+  let mergedN = 0;
+  try { mergedN = (JSON.parse(r.merged_from || '[]') || []).length; } catch (e) { }
+  if (mergedN) dur += ` · 合併 ${mergedN} 段`;
   const done = !!r.ended_at;
   btn.innerHTML =
     '<span class="hmain"><span class="hcourse"></span>' +
