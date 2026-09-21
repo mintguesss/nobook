@@ -11,6 +11,9 @@ $root = $PSScriptRoot
 $tailscale = "C:\Program Files\Tailscale\tailscale.exe"
 $port = 8000
 
+$venvPython = Join-Path $root ".venv\Scripts\python.exe"
+$python = if (Test-Path $venvPython) { $venvPython } else { "python" }
+
 function Fail($msg, $fix) {
     Write-Host "  [X] $msg" -ForegroundColor Red
     if ($fix) { Write-Host "      $fix" -ForegroundColor Yellow }
@@ -84,7 +87,11 @@ if ($CheckOnly) { Write-Host "`n前置檢查全部通過。`n" -ForegroundColor 
 Write-Host "`n=== 啟動服務 ===" -ForegroundColor Cyan
 Push-Location $root
 try {
-    $server = Start-Process python -ArgumentList "-m","server.main" -PassThru -NoNewWindow
+    # 規格 §10 的預設是不保存原始音訊，但實際要回頭聽某一段確認 ASR
+    # 有沒有聽錯，所以這裡打開。沒開的話錄音完全不會留下檔案。
+    if (-not $env:LS_SAVE_AUDIO) { $env:LS_SAVE_AUDIO = "1" }
+
+    $server = Start-Process $python -ArgumentList "-m","server.main" -PassThru -NoNewWindow
 
     # 等 /api/health 回應
     $ready = $false
