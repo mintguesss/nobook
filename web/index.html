@@ -81,7 +81,13 @@
   #to-latest.show { display: block; }
 
   /* 摘要側欄（規格 §8.1-4）---------------------------------------- */
-  #hist-top { font-size: 13px; }
+  /* 標頭的次要按鈕：跟「首頁」同形狀，但不搶視覺重量 */
+  .hbtn {
+    flex: none; background: none; border: 1px solid var(--line);
+    color: var(--fg-dim); font-size: 13px;
+    padding: 7px 11px; border-radius: 8px; cursor: pointer;
+  }
+  .hbtn:active { background: var(--panel-2); color: var(--fg); }
   .secsum { margin: 6px 0 10px; opacity: .85; line-height: 1.55; }
   .sechead {
     font-weight: 600; font-size: 13px; margin: 10px 0 2px;
@@ -153,10 +159,21 @@
   .hmerge:disabled { color: var(--fg-dim); font-weight: 400; }
   /* 版本號：改版送不送得到手機上，這是唯一看得出來的地方 */
   #build { margin-left: auto; font-size: 11px; color: var(--fg-dim); }
+  /* 即時整理的標頭：右上一個縮小符號，按了整區縮成這一行 */
   #sumbar {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 8px; padding: 6px 10px; font-size: 13px; opacity: .8;
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px 4px; font-size: 12px; color: var(--fg-dim);
   }
+  #sum-toggle {
+    margin-left: auto; width: 26px; height: 26px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: 1px solid var(--line); border-radius: 7px;
+    color: var(--fg-dim); font-size: 13px; cursor: pointer;
+    transition: transform .12s;
+  }
+  #sum-toggle:active { background: var(--panel-2); color: var(--fg); }
+  #sumwrap.folded #sum-toggle { transform: rotate(-90deg); }
+  #sumwrap.folded #summaries { display: none; }
   #summaries {
     flex: none; max-height: 38%; overflow-y: auto;
     background: var(--panel); border-top: 1px solid var(--line); padding: 6px 0;
@@ -368,7 +385,7 @@
 
 <header>
   <button id="home" title="回首頁">◀ 首頁</button>
-  <button id="hist-top" title="歷史紀錄與筆記">紀錄</button>
+  <button id="hist-top" class="hbtn" title="歷史紀錄與筆記">紀錄</button>
   <span class="dot" id="dot" title="連線狀態"></span>
   <span id="elapsed">00:00:00</span>
   <span class="meta">
@@ -382,11 +399,13 @@
     <div id="transcript" role="log" aria-live="polite"></div>
     <button id="to-latest">回到最新 ↓</button>
   </div>
-  <div id="sumbar" hidden>
-    <span id="sumcount"></span>
-    <button id="sum-toggle" class="link">全部收起</button>
+  <div id="sumwrap">
+    <div id="sumbar" hidden>
+      <span id="sumcount"></span>
+      <button id="sum-toggle" title="收合即時整理" aria-label="收合">⌄</button>
+    </div>
+    <div id="summaries"></div>
   </div>
-  <div id="summaries"></div>
 </main>
 
 <footer>
@@ -465,6 +484,9 @@
   <div id="history-list"></div>
 </div>
 
-<script src="app.js"></script>
+<!-- ?v= 是必要的：index.html 和 app.js 會被各自快取，版本對不上時
+     畫面上看得到新按鈕、但監聽器在舊檔裡，按了完全沒反應。
+     這個字串要跟 sw.js 的 VERSION 一致，selftest 會檢查。 -->
+<script src="app.js?v=v15"></script>
 </body>
 </html>

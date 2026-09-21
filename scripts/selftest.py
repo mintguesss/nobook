@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 import tempfile
 from collections import Counter
@@ -571,6 +572,20 @@ def test_materials(gate):
                "沒有對齊資料時筆記原樣不動")
     gate.check(export.annotate_slides(out, align) == out,
                "重複匯出不會把頁碼疊加兩次")
+
+    # index.html 與 app.js 會被各自快取。版本對不上時，畫面上看得到新按鈕、
+    # 但監聽器還在舊的 app.js 裡，按了完全沒反應——而且外觀完全正常，
+    # 查不出來。實測發生過一次（標頭的「紀錄」鍵）。
+    web = Path(__file__).resolve().parent.parent / "web"
+    html = (web / "index.html").read_text(encoding="utf-8")
+    sw = (web / "sw.js").read_text(encoding="utf-8")
+    m_html = re.search(r'script src="app\.js\?v=([^"]+)"', html)
+    m_sw = re.search(r"const VERSION = '([^']+)'", sw)
+    gate.check(bool(m_html), "index.html 的 script 標籤帶版本參數（?v=）")
+    gate.check(bool(m_html) and bool(m_sw) and m_html.group(1) == m_sw.group(1),
+               "script 標籤的 ?v= 與 Service Worker 版本一致",
+               "html=%s sw=%s" % (m_html.group(1) if m_html else "無",
+                                  m_sw.group(1) if m_sw else "無"))
 
 
 # ── 儲存層（規格 §10）─────────────────────────────────────────────────

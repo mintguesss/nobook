@@ -383,16 +383,18 @@ function updateSumBar() {
   const ns = state.sections.size;
   el.sumBar.hidden = nb === 0;
   if (!nb) return;
-  const openN = [...state.batches.values()].filter((d) => d.open).length;
   el.sumCount.textContent =
-    ns > nb ? `整理 ${nb} 次 · 共 ${ns} 段` : `整理 ${nb} 次`;
-  el.sumToggle.textContent = openN ? '全部收起' : '全部展開';
+    ns > nb ? `即時整理 ${nb} 次 · 共 ${ns} 段` : `即時整理 ${nb} 次`;
 }
 
+// 縮成一行。原本是「全部收起」＝把每一則 details 關起來，但那樣整理列
+// 還是佔著整個下半螢幕；上課時要看的是逐字稿，整理好的東西收掉就好。
 function toggleAllSections() {
-  const want = [...state.batches.values()].every((d) => !d.open);
-  for (const d of state.batches.values()) d.open = want;
-  updateSumBar();
+  const wrap = $('sumwrap');
+  if (!wrap) return;
+  const folded = wrap.classList.toggle('folded');
+  el.sumToggle.title = folded ? '展開即時整理' : '收合即時整理';
+  el.sumToggle.setAttribute('aria-label', folded ? '展開' : '收合');
 }
 
 // 段落內容：導言 + 子題 + 要點。一段裡二十幾個同一層級的句子不是筆記，
@@ -806,7 +808,7 @@ function historyRow(r, courseName) {
 // 涵蓋率通常不高（實測一堂 21%）——老師講投影片以外的東西、Q&A、
 // 純圖片的頁都對不上。所以這裡把涵蓋率直接寫出來，不要讓使用者
 // 以為沒列到的部分是漏掉了。
-async function renderAlign(id, d) {
+async function renderAlign(id, d, addSec) {
   let a = null;
   try { a = await (await fetch(`/api/sessions/${id}/align`)).json(); } catch (e) { return; }
   const has = a && a.pages && a.pages.length;
@@ -871,7 +873,19 @@ async function showBuild() {
   try {
     const t = await (await fetch('sw.js', { cache: 'no-store' })).text();
     const m = t.match(/const VERSION = '([^']+)'/);
-    el2.textContent = m ? m[1] : '';
+    const server = m ? m[1] : '';
+    const tag = document.querySelector('script[src*="app.js"]');
+    const mine = (tag && (tag.getAttribute('src').split('v=')[1] || '')) || '';
+    el2.textContent = server;
+    if (mine && server && mine !== server) {
+      // 這種狀況畫面看起來完全正常，但按鈕會沒反應——一定要講出來
+      el2.textContent = mine + ' ≠ ' + server;
+      el2.style.color = 'var(--warn)';
+      el2.title = '快取沒更新，把 App 完全關掉再開';
+    } else {
+      el2.style.color = '';
+      el2.title = '';
+    }
   } catch (e) { el2.textContent = ''; }
 }
 
@@ -1007,8 +1021,13 @@ async function openDetail(id, courseName) {
     sec.appendChild(b);
   }
 
-  // 1.8 投影片對照
-  await renderAlign(id, d);
+  // 1.8 投影片對照。包 try：任何一節出錯都不該讓後面的筆記整個不渲染
+  //（發生過一次——addSec 不在作用域裡，結果詳細頁只剩錄音那一節）
+  try {
+    await renderAlign(id, d, addSec);
+  } catch (e) {
+    addSec('投影片對照', '載入失敗：' + e.message);
+  }
 
   // 2. 課中整理：每次按「即時整理」產生的段落
   const secWrap = addSec(`課中整理`, d.sections.length ? null : '這堂課沒有按過即時整理',
