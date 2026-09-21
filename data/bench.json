@@ -1,24 +1,24 @@
 {
-  "measured_at": "2026-09-15T20:17:22.830618+08:00",
+  "measured_at": "2026-09-21T15:39:13.400347+08:00",
   "gpu": {
-    "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
-    "total_mb": 8188.0,
-    "baseline_used_mb": 608.0,
-    "available_mb": 7580.0
+    "name": "NVIDIA GeForce RTX 4070 Ti",
+    "total_mb": 12282.0,
+    "baseline_used_mb": 0.0,
+    "available_mb": 12282.0
   },
   "asr": {
-    "model": "C:\\Project\\nobook\\lecture-scribe\\models\\breeze-asr-25-ct2",
+    "model": "D:\\project\\nobook\\models\\breeze-asr-25-ct2",
     "device": "cuda",
     "compute_type": "int8_float16",
-    "idle_mb": 1601.0,
-    "peak_mb": 2104.0,
-    "rtf": 0.0766
+    "idle_mb": 1696.0,
+    "peak_mb": 2226.0,
+    "rtf": 0.1082
   },
   "deviations": {
     "summary_latency_p95_s": {
       "spec_estimate": 8.0,
-      "measured": 10.74,
-      "deviation_pct": 34.2,
+      "measured": 5.07,
+      "deviation_pct": 36.6,
       "note": "以實測為準，未調整至規格書估計值"
     },
     "rtf": {
@@ -47,9 +47,9 @@
     "device": "cuda",
     "n_gpu_layers": -1,
     "no_think": false,
-    "peak_mb": 5669.0,
-    "tps": 37.6,
-    "latency_p95_s": 10.74
+    "peak_mb": 6065.0,
+    "tps": 79.5,
+    "latency_p95_s": 5.07
   },
   "summary_model_final": {
     "model": "Qwen3-8B-Q4_K_M.gguf",
@@ -58,9 +58,9 @@
     "device": "cuda",
     "n_gpu_layers": -1,
     "no_think": true,
-    "peak_mb": 5830.0,
-    "tps": 45.7,
-    "latency_p95_s": 8.85
+    "peak_mb": 5945.0,
+    "tps": 85.7,
+    "latency_p95_s": 4.68
   },
   "candidates_tried": [
     {
@@ -70,8 +70,12 @@
       "ctx": 8192,
       "device": "cuda",
       "no_think": true,
-      "result": "OOM",
-      "error": "呼叫 llama-server 失敗："
+      "peak_mb": 8137.0,
+      "peak_abs_mb": 8137.0,
+      "tps": 47.9,
+      "latency_p95_s": 8.44,
+      "latency_mean_s": 8.35,
+      "result": "SLOW"
     },
     {
       "model": "Qwen3-8B-Q4_K_M.gguf",
@@ -80,8 +84,12 @@
       "ctx": 4096,
       "device": "cuda",
       "no_think": true,
-      "result": "OOM",
-      "error": "呼叫 llama-server 失敗："
+      "peak_mb": 7589.0,
+      "peak_abs_mb": 7589.0,
+      "tps": 48.0,
+      "latency_p95_s": 8.41,
+      "latency_mean_s": 8.34,
+      "result": "SLOW"
     },
     {
       "model": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
@@ -90,11 +98,26 @@
       "ctx": 8192,
       "device": "cuda",
       "no_think": false,
-      "peak_mb": 5669.0,
-      "peak_abs_mb": 6277.0,
-      "tps": 37.6,
-      "latency_p95_s": 10.74,
-      "latency_mean_s": 10.64,
+      "peak_mb": 6065.0,
+      "peak_abs_mb": 6065.0,
+      "tps": 79.5,
+      "latency_p95_s": 5.07,
+      "latency_mean_s": 5.03,
+      "result": "SELECTED"
+    },
+    {
+      "model": "Qwen3-8B-Q4_K_M.gguf",
+      "key": "qwen3-8b-q4km-c8192",
+      "quant": "Q4_K_M",
+      "ctx": 8192,
+      "device": "cuda",
+      "no_think": true,
+      "peak_mb": 5945.0,
+      "peak_abs_mb": 6155.0,
+      "tps": 85.7,
+      "latency_p95_s": 4.68,
+      "latency_mean_s": 4.67,
+      "final_summary_s": 4.7,
       "result": "SELECTED"
     }
   ],
