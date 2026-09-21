@@ -41,6 +41,7 @@ Thumbs.db
 # ── 教材：老師的投影片，不是我的東西 ──────────────────────────────
 materials/*
 !materials/.gitkeep
+!materials/README.md
 
 # ── 搬家包：裡面是實際的錄音與逐字稿，只用隨身碟／OneDrive 傳 ────────
 搬家包/

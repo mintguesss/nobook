@@ -556,6 +556,31 @@ def test_materials(gate):
     gate.check(len(a3) == len(chunks), "沒有文字的投影片頁不會讓對齊崩潰")
     gate.check(M.align([], chunks) == ([], []), "沒有投影片時回傳空結果")
 
+    # 教材一定要照課程分。攤平的話每堂課都會去比對所有教材——實測
+    # 管理資訊系統那堂跑去對照生產與作業管理的投影片，分數還不低。
+    class C:
+        def __init__(self, i, n):
+            self.id, self.name = i, n
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        (root / "aa-2026").mkdir()
+        (root / "aa-2026" / "week1.pdf").write_bytes(b"x")
+        (root / "乙課程").mkdir()
+        (root / "乙課程" / "week1.pptx").write_bytes(b"x")
+        (root / "還沒分類.pdf").write_bytes(b"x")
+        a = M.list_materials(root, course=C("aa-2026", "甲課程"))
+        b = M.list_materials(root, course=C("bb-2026", "乙課程"))
+        c = M.list_materials(root, course=C("cc-2026", "丙課程"))
+        gate.check([x["name"] for x in a] == ["week1.pdf"],
+                   "只拿得到自己課程資料夾裡的教材", str([x["name"] for x in a]))
+        gate.check([x["name"] for x in b] == ["week1.pptx"],
+                   "資料夾用課名命名也認得")
+        gate.check(c == [], "沒有自己資料夾的課拿不到任何教材（不會誤用別課的）")
+        allm = M.list_materials(root)
+        gate.check(len(allm) == 3
+                   and any(x["course_id"] is None for x in allm),
+                   "列出全部時，根目錄的檔案標成未分類", str(len(allm)))
+
     # 把頁碼補進已經存好的筆記（完整版在對照之前就寫進資料庫了）
     nl = chr(10)
     md = nl.join(["# 課", "", "### 甲段 `[00:17:25]`", "- x", "",

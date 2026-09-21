@@ -151,17 +151,52 @@ def read_pages(path):
     raise ValueError("不支援的格式：%s（只吃 %s）" % (ext, "、".join(SUPPORTED)))
 
 
-def list_materials(materials_dir=None):
-    """列出教材資料夾裡的檔案。"""
+def _entry(f: Path, course_id):
+    return {"name": f.name, "path": str(f), "bytes": f.stat().st_size,
+            "course_id": course_id,
+            "id": hashlib.sha1(str(f).encode()).hexdigest()[:12]}
+
+
+def course_dir(course, materials_dir=None):
+    """這門課的教材資料夾。資料夾名可以用課程代號或課名，兩個都認。
+
+    用課名是給人看的（`materials/生產與作業管理/`），用代號是給腳本用的
+    （`materials/pom-2026/`）。兩個都接受，不然使用者得先去查代號。
+    """
+    d = Path(materials_dir or config.MATERIALS_DIR)
+    if course is None:
+        return None
+    for key in (getattr(course, "id", None), getattr(course, "name", None)):
+        if key and (d / str(key)).is_dir():
+            return d / str(key)
+    return None
+
+
+def list_materials(materials_dir=None, course=None):
+    """列出教材。
+
+    **一定要照課程分資料夾。** 教材放在 materials/ 底下攤平的話，每一堂課
+    都會拿去比對所有教材——實測管理資訊系統那堂跑去對照生產與作業管理的
+    投影片，而且分數還不低（同樣是管理學院的課，用詞重疊）。
+    沒有指定課程時回傳全部，並在每一筆標上它屬於哪個資料夾。
+    """
     d = Path(materials_dir or config.MATERIALS_DIR)
     if not d.exists():
         return []
+    if course is not None:
+        cd = course_dir(course, materials_dir)
+        if cd is None:
+            return []
+        return [_entry(f, cd.name) for f in sorted(cd.iterdir())
+                if f.is_file() and f.suffix.lower() in SUPPORTED]
     out = []
     for f in sorted(d.iterdir()):
         if f.is_file() and f.suffix.lower() in SUPPORTED:
-            st = f.stat()
-            out.append({"name": f.name, "path": str(f), "bytes": st.st_size,
-                        "id": hashlib.sha1(str(f).encode()).hexdigest()[:12]})
+            out.append(_entry(f, None))          # 放在根目錄＝還沒分類
+        elif f.is_dir():
+            for g in sorted(f.iterdir()):
+                if g.is_file() and g.suffix.lower() in SUPPORTED:
+                    out.append(_entry(g, f.name))
     return out
 
 
@@ -340,7 +375,8 @@ def _joint_align(mats, chunks, threshold):
     return picks
 
 
-def align_all(segments, materials_dir=None, threshold=MATCH_THRESHOLD):
+def align_all(segments, materials_dir=None, threshold=MATCH_THRESHOLD,
+              course=None):
     """把逐字稿對到「所有教材的所有頁」，回傳每一塊的歸屬。
 
     不要先問「這堂用哪一份教材」再對齊——一堂課同時用到兩份是常態
@@ -352,7 +388,7 @@ def align_all(segments, materials_dir=None, threshold=MATCH_THRESHOLD):
     再讓每一塊挑分數最高的那一份。對不上任何一頁的塊標成 None。
     """
     mats = []
-    for m in list_materials(materials_dir):
+    for m in list_materials(materials_dir, course=course):
         try:
             mats.append((m, read_pages(m["path"])))
         except Exception as e:
@@ -430,7 +466,8 @@ def pages_for_span(ranges, start_s, end_s):
     return [{"material": m, "pages": sorted(ps)} for m, ps in by_mat.items()]
 
 
-def best_material(segments, materials_dir=None, threshold=MATCH_THRESHOLD):
+def best_material(segments, materials_dir=None, threshold=MATCH_THRESHOLD,
+                  course=None):
     """這段逐字稿最可能對應哪一份教材。回傳照分數排序的候選清單。
 
     「挑哪一份」和「對到第幾頁」是兩個不同的問題，要用不同的 IDF：
@@ -444,7 +481,7 @@ def best_material(segments, materials_dir=None, threshold=MATCH_THRESHOLD):
     排序後的清單，不是單一答案。
     """
     mats = []
-    for m in list_materials(materials_dir):
+    for m in list_materials(materials_dir, course=course):
         try:
             mats.append((m, read_pages(m["path"])))
         except Exception as e:

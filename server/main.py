@@ -198,10 +198,27 @@ async def _finish_from_db(session_id: str, s: dict) -> dict:
 
 @app.get("/api/materials")
 async def api_materials():
-    """教材資料夾裡有哪些投影片。"""
+    """教材有哪些，照課程資料夾分。
+
+    放在 materials/ 根目錄（沒分資料夾）的檔案會被列成「未分類」，
+    而且**不會拿來對照**——攤平的話每堂課都會去比對所有教材，
+    實測管理資訊系統那堂跑去對照生產與作業管理的投影片。
+    """
     from . import materials
-    return {"dir": str(config.MATERIALS_DIR),
-            "files": materials.list_materials()}
+    files = materials.list_materials()
+    groups = {}
+    for f in files:
+        groups.setdefault(f["course_id"] or "", []).append(f)
+    known = {c["id"]: c["name"] for c in courses.list_courses()}
+    names = {c["name"] for c in courses.list_courses()}
+    out = []
+    for key, fs in sorted(groups.items()):
+        out.append({"folder": key,
+                    "course": known.get(key) or (key if key in names else None),
+                    "known": bool(key) and (key in known or key in names),
+                    "files": fs})
+    return {"dir": str(config.MATERIALS_DIR), "groups": out,
+            "hint": "把投影片放到 materials/<課程代號或課名>/ 底下"}
 
 
 @app.post("/api/sessions/{session_id}/align")
@@ -217,12 +234,16 @@ async def api_align(session_id: str):
     segs = storage.list_segments(session_id)
     if not segs:
         raise HTTPException(status_code=400, detail="這堂沒有逐字稿")
-    if not materials.list_materials():
+    # 只比對這門課自己的教材。不限定的話每堂課都會去對照所有課的投影片。
+    course = courses.get_course(s["course_id"])
+    if not materials.list_materials(course=course):
         raise HTTPException(
             status_code=400,
-            detail="教材資料夾是空的：把投影片放到 %s" % config.MATERIALS_DIR)
+            detail="這門課還沒有教材。把投影片放到 %s\%s\ 底下"
+                   % (config.MATERIALS_DIR, course.id))
 
-    res = await asyncio.to_thread(materials.align_all, segs)
+    res = await asyncio.to_thread(materials.align_all, segs, None,
+                                  materials.MATCH_THRESHOLD, course)
     payload = {
         "coverage": res["coverage"],
         "matched": res["matched"],
