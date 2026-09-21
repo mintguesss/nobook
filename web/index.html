@@ -98,8 +98,31 @@
   .batch[open] > summary::before { content: '▾'; }
   .batch .bmeta { font-weight: 400; font-size: 12px; opacity: .6; }
   .batch .bbody { padding: 0 6px 6px; }
-  .mergebox { margin-top: 18px; border-top: 1px solid #2a2f3a; padding-top: 10px; }
-  .mergehead { font-size: 13px; opacity: .7; padding: 4px 10px 8px; }
+  /* 合併區塊：沿用歷史列的視覺語言（同樣的列高、同樣的分隔線），
+     只用左側一條強調色標示它是動作區，不要做成另一種卡片。 */
+  .mergebox { border-bottom: 1px solid var(--line); }
+  .mergehead {
+    font-size: 12px; color: var(--fg-dim); letter-spacing: .02em;
+    padding: 14px 16px 6px;
+  }
+  .mergebox .hitem {
+    border-bottom: none; border-left: 2px solid var(--accent);
+  }
+  .mergebox .hmain {
+    flex: 1; min-width: 0; padding: 12px 16px; font-size: 14px;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .mergebox .mtitle { font-weight: 600; }
+  .mergebox .mmeta { color: var(--fg-dim); font-size: 12px; }
+  .hmerge {
+    flex: none; padding: 0 18px; background: none; border: none;
+    border-left: 1px solid var(--line);
+    color: var(--accent); font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .hmerge:active { background: rgba(77,163,255,.12); }
+  .hmerge:disabled { color: var(--fg-dim); font-weight: 400; }
+  /* 版本號：改版送不送得到手機上，這是唯一看得出來的地方 */
+  #build { margin-left: auto; font-size: 11px; color: var(--fg-dim); }
   #sumbar {
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px; padding: 6px 10px; font-size: 13px; opacity: .8;
@@ -405,6 +428,7 @@
 <div id="history">
   <header class="bar">
     <span>歷史筆記</span>
+    <span id="build"></span>
     <button id="history-close" class="link">關閉</button>
   </header>
   <div id="usage"></div>

@@ -712,6 +712,7 @@ function renderCheck(wrap, check) {
 // ── 歷史筆記（規格 §10 的資料都在，只是原本沒有介面看）────────────────
 async function openHistory() {
   el.history.classList.add('show');
+  showBuild();
   el.historyList.innerHTML = '';
   showUsage();
   let rows;
@@ -725,6 +726,8 @@ async function openHistory() {
   try {
     for (const c of await (await fetch('/api/courses')).json()) courses.set(c.id, c.name);
   } catch (e) { /* 課名拿不到就顯示 id */ }
+
+  await renderMergeGroups(courses);
 
   for (const r of rows) {
     const btn = document.createElement('button');
@@ -768,7 +771,18 @@ async function openHistory() {
     wrap.appendChild(del);
     el.historyList.appendChild(wrap);
   }
-  await renderMergeGroups(courses);
+}
+
+// 版本號。手機／平板的 Service Worker 沒更新時，畫面看起來跟舊版一模一樣，
+// 沒有這個就只能猜。對不上就是快取還沒換掉。
+async function showBuild() {
+  const el2 = $('build');
+  if (!el2) return;
+  try {
+    const t = await (await fetch('sw.js', { cache: 'no-store' })).text();
+    const m = t.match(/const VERSION = '([^']+)'/);
+    el2.textContent = m ? m[1] : '';
+  } catch (e) { el2.textContent = ''; }
 }
 
 // 同一天被拆成好幾段錄的課，合併成一堂重新產生總筆記
@@ -782,18 +796,23 @@ async function renderMergeGroups(courses) {
   box.className = 'mergebox';
   const h = document.createElement('div');
   h.className = 'mergehead';
-  h.textContent = '可以合併的課（同一天、同一門）';
+  h.textContent = '同一天分成好幾段錄的課，可以合併成一堂';
   box.appendChild(h);
   for (const g of groups) {
     const row = document.createElement('div');
     row.className = 'hitem';
     const label = document.createElement('span');
     label.className = 'hmain';
-    label.textContent =
-      `${courses.get(g.course_id) || g.course_id} · ${g.date} · ` +
-      `${g.count} 段 · 共 ${Math.round(g.total_s / 60)} 分鐘`;
+    const t = document.createElement('span');
+    t.className = 'mtitle';
+    t.textContent = courses.get(g.course_id) || g.course_id;
+    const m = document.createElement('span');
+    m.className = 'mmeta';
+    m.textContent = `${g.date} · ${g.count} 段 · 共 ${Math.round(g.total_s / 60)} 分鐘`;
+    label.appendChild(t);
+    label.appendChild(m);
     const btn = document.createElement('button');
-    btn.className = 'hdel';
+    btn.className = 'hmerge';
     btn.textContent = '合併';
     btn.addEventListener('click', async () => {
       if (!confirm(`把這 ${g.count} 段接成一堂並重新產生總筆記？
