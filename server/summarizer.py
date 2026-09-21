@@ -165,7 +165,7 @@ WORKSHEET_REFLECT_TMPL = """你在幫一位**研究所學生**寫課堂學習單
   也不要每一則都用「如果…」「若…」「當…」開場，或每一則都是
   「某某的某某，依賴／取決於／反映某某」這同一個骨架。
 - 每一則扣不同的內容，不要整欄都在講同一組概念。
-- 一到兩句，四十到七十字，他是用手抄的。
+- 每一則 %d 到 %d 字，寫成完整的句子，他是用手抄的。
 
 %s
 
@@ -185,7 +185,19 @@ WORKSHEET_AVOID_TMPL = """# 不可以重複
 WORKSHEET_RETRY_TMPL = """剛才那次有下面的問題：
 %s
 
-重寫這一欄。每一則換一種說法開場、換一個句型，長度控制在七十字以內。"""
+重寫這一欄。每一則換一種說法開場、換一個句型，長度控制在 %d 字以內。"""
+
+
+WORKSHEET_CHARS_DEFAULT = (40, 70)
+
+
+def worksheet_chars(sec) -> tuple:
+    """這一欄每則的字數範圍。課程設定沒寫就用預設。"""
+    chars = sec.get("chars")
+    if chars:
+        lo, hi = int(chars[0]), int(chars[1])
+        return max(10, lo), max(lo + 10, hi)
+    return WORKSHEET_CHARS_DEFAULT
 
 
 def worksheet_counts(sec, n_source: int = 0) -> tuple:
@@ -1160,18 +1172,19 @@ class Summarizer:
                              n_source: int = 0):
         """產出一個感受型欄位，回傳 (要點列表, degraded)。"""
         lo, hi = worksheet_counts(sec, n_source)
+        clo, chi = worksheet_chars(sec)
         avoid_block = ""
         if avoid:
             avoid_block = WORKSHEET_AVOID_TMPL % "\n".join(
                 "- " + a for a in avoid[-14:])
         system = WORKSHEET_REFLECT_TMPL % (
             sec["title"], sec.get("hint") or sec["title"], lo, hi,
-            avoid_block, sec["id"])
+            clo, chi, avoid_block, sec["id"])
         schema = build_worksheet_schema([sec], with_exam=False, n_source=n_source)
 
         async def run(user):
             ctx = getattr(self.manager, "current_ctx", 0)
-            want = max(900, int(hi * 70 * TOKENS_PER_CHAR * 2.0))
+            want = max(900, int(hi * chi * TOKENS_PER_CHAR * 2.0))
             if ctx:
                 room = ctx - estimate_tokens(system + user) - 256
                 if room > 256:
@@ -1182,14 +1195,17 @@ class Summarizer:
             return [str(x).strip() for x in (vals or [])
                     if not is_placeholder(str(x))]
 
+        # 字數上限比要求的再寬一點，不然剛好寫到上限的那幾則會被判成抄不完
+        cap = chi + 25
         pts = await run(base_user)
-        issues = worksheet_quality_issues(pts)
+        issues = worksheet_quality_issues(pts, max_chars=cap)
         if issues:
             log.warning("「%s」品質不合格，重寫一次：%s",
                         sec["title"], "；".join(issues))
             retry = await run(base_user + "\n\n" + WORKSHEET_RETRY_TMPL
-                              % "\n".join("- " + x for x in issues))
-            if retry and len(worksheet_quality_issues(retry)) < len(issues):
+                              % ("\n".join("- " + x for x in issues), chi))
+            if retry and len(worksheet_quality_issues(
+                    retry, max_chars=cap)) < len(issues):
                 pts = retry
         fake = fabricated_past(pts)
         if fake:

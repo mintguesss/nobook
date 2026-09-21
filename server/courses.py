@@ -86,6 +86,11 @@ def _parse_handcopy_sections(raw, course_id: str) -> list:
             count = (int(count[0]), int(count[1]))
         else:
             count = None
+        chars = item.get("chars")
+        if isinstance(chars, (list, tuple)) and len(chars) == 2:
+            chars = (int(chars[0]), int(chars[1]))
+        else:
+            chars = None
         out.append({
             "id": str(item.get("id") or ("s%d" % (i + 1))),
             "title": title,
@@ -93,6 +98,9 @@ def _parse_handcopy_sections(raw, course_id: str) -> list:
             "pick": int(item.get("pick") or 0),
             # count 直接指定則數上下限，蓋過由 pick 推出來的預設值
             "count": count,
+            # chars 指定每則的字數範圍。反思這種要寫出推論過程的欄位，
+            # 用預設的長度會被壓成一句結論。
+            "chars": chars,
             # style=detail 代表這欄要寫細節與名詞解釋，不是條列標題
             "style": str(item.get("style") or "").strip(),
         })
