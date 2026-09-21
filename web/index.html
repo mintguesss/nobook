@@ -104,6 +104,12 @@
   .batch[open] > summary::before { content: '▾'; }
   .batch .bmeta { font-weight: 400; font-size: 12px; opacity: .6; }
   .batch .bbody { padding: 0 6px 6px; }
+  .ptag {
+    margin-left: auto; flex: none; font-size: 11px; padding: 2px 7px;
+    border-radius: 999px; background: var(--panel-2); color: var(--accent);
+    border: 1px solid var(--line);
+  }
+
   .plist { list-style: none; margin: 4px 0 0; padding: 0; }
   .plist li { display: flex; align-items: baseline; gap: 10px; padding: 3px 0; }
   .pjump {
@@ -318,12 +324,21 @@
     display: none; flex-direction: column; }
   #detail.show { display: flex; }
   #detail-body { flex: 1; overflow-y: auto; padding: 0 0 28px; }
-  .dsec { border-bottom: 1px solid var(--line); padding: 16px; }
-  .dsec h3 {
-    margin: 0 0 10px; font-size: 15px; color: var(--accent);
-    display: flex; align-items: center; gap: 8px;
+  .dsec { border-bottom: 1px solid var(--line); }
+  .dsec > summary {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    padding: 15px 16px; font-size: 15px; color: var(--accent);
+    font-weight: 600; list-style: none;
   }
-  .dsec h3 .n { color: var(--fg-dim); font-weight: 400; font-size: 12px; }
+  .dsec > summary::-webkit-details-marker { display: none; }
+  .dsec > summary::after {
+    content: '⌄'; margin-left: auto; color: var(--fg-dim);
+    font-weight: 400; transition: transform .12s;
+  }
+  .dsec[open] > summary::after { transform: rotate(180deg); }
+  .dsec > summary:active { background: var(--panel-2); }
+  .dsec .n { color: var(--fg-dim); font-weight: 400; font-size: 12px; }
+  .dbody { padding: 0 16px 16px; }
   .dsec audio { width: 100%; margin-top: 4px; }
   .dsec pre {
     margin: 0; white-space: pre-wrap; word-break: break-word;
@@ -487,6 +502,6 @@
 <!-- ?v= 是必要的：index.html 和 app.js 會被各自快取，版本對不上時
      畫面上看得到新按鈕、但監聽器在舊檔裡，按了完全沒反應。
      這個字串要跟 sw.js 的 VERSION 一致，selftest 會檢查。 -->
-<script src="app.js?v=v15"></script>
+<script src="app.js?v=v17"></script>
 </body>
 </html>

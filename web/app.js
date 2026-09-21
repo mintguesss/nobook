@@ -808,9 +808,7 @@ function historyRow(r, courseName) {
 // 涵蓋率通常不高（實測一堂 21%）——老師講投影片以外的東西、Q&A、
 // 純圖片的頁都對不上。所以這裡把涵蓋率直接寫出來，不要讓使用者
 // 以為沒列到的部分是漏掉了。
-async function renderAlign(id, d, addSec) {
-  let a = null;
-  try { a = await (await fetch(`/api/sessions/${id}/align`)).json(); } catch (e) { return; }
+function renderAlign(id, d, addSec, a) {
   const has = a && a.pages && a.pages.length;
   const sec = addSec('投影片對照',
                      has ? null : '還沒對照過，或這堂沒有對到任何投影片');
@@ -858,11 +856,46 @@ async function renderAlign(id, d, addSec) {
       li.querySelector('.pjump').textContent = 'p' + e.page;
       li.querySelector('.pt').textContent =
         `${fmt(e.start_s)}–${fmt(e.end_s)}　${e.score.toFixed(2)}`;
-      li.querySelector('.pjump').addEventListener('click', () => jumpTo(e.start_s));
+      // 詳細頁裡沒有即時逐字稿可以跳，要跳到對應的那一則課中整理
+      li.querySelector('.pjump').addEventListener('click', () => jumpToNote(e.start_s));
       ul.appendChild(li);
     }
     sec.appendChild(ul);
   }
+}
+
+// 這段時間對到哪幾頁投影片，寫成「p8–p11」。多份教材就各寫一段。
+function slideTag(align, startS, endS) {
+  if (!align || !align.pages) return '';
+  const byMat = new Map();
+  for (const e of align.pages) {
+    if (e.end_s <= startS || e.start_s >= endS) continue;
+    if (!byMat.has(e.material)) byMat.set(e.material, []);
+    byMat.get(e.material).push(e.page);
+  }
+  if (!byMat.size) return '';
+  const parts = [];
+  for (const ps of byMat.values()) {
+    ps.sort((a, b) => a - b);
+    parts.push(ps.length === 1 ? `p${ps[0]}` : `p${ps[0]}–p${ps[ps.length - 1]}`);
+  }
+  return parts.join('、');
+}
+
+// 從投影片對照跳到對應的那一則課中整理（詳細頁裡沒有即時逐字稿）
+function jumpToNote(startS) {
+  const all = [...el.detailBody.querySelectorAll('.sec[data-start]')];
+  if (!all.length) return;
+  let target = all[0];
+  for (const n of all) {
+    if (parseFloat(n.dataset.start) <= startS + 1) target = n;
+  }
+  const holder = target.closest('details.dsec');
+  if (holder) holder.open = true;
+  target.open = true;
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target.classList.add('flash');
+  setTimeout(() => target.classList.remove('flash'), 1600);
 }
 
 // 版本號。手機／平板的 Service Worker 沒更新時，畫面看起來跟舊版一模一樣，
@@ -999,7 +1032,8 @@ async function openDetail(id, courseName) {
   //     沒有這顆按鈕的話，那堂課永遠停在「未結束」，既不能繼續也不能結束。
   if (!d.session.ended_at) {
     const sec = addSec('這堂課沒有正常結束',
-                       `逐字稿有 ${d.segments.length} 段，可以直接收尾產生筆記`);
+                       `逐字稿有 ${d.segments.length} 段，可以直接收尾產生筆記`,
+                       null, true);
     const b = document.createElement('button');
     b.className = 'primary';
     b.textContent = '結束並產生筆記';
@@ -1023,8 +1057,13 @@ async function openDetail(id, courseName) {
 
   // 1.8 投影片對照。包 try：任何一節出錯都不該讓後面的筆記整個不渲染
   //（發生過一次——addSec 不在作用域裡，結果詳細頁只剩錄音那一節）
+  let align = null;
   try {
-    await renderAlign(id, d, addSec);
+    align = await (await fetch(`/api/sessions/${id}/align`)).json();
+    if (!align || !align.pages || !align.pages.length) align = null;
+  } catch (e) { align = null; }
+  try {
+    renderAlign(id, d, addSec, align);
   } catch (e) {
     addSec('投影片對照', '載入失敗：' + e.message);
   }
@@ -1039,6 +1078,16 @@ async function openDetail(id, courseName) {
                     '</summary><div class="secbody"></div>';
     det.querySelector('.ts').textContent = fmt(sc.start_s);
     det.querySelector('.title').textContent = sc.title;
+    det.dataset.start = sc.start_s;
+    // 這一則對到哪幾頁投影片。沒對到就不標——標一個錯的頁碼比不標更糟，
+    // 使用者會照著去翻然後發現不是那頁。
+    const tag = slideTag(align, sc.start_s, sc.end_s);
+    if (tag) {
+      const b = document.createElement('span');
+      b.className = 'ptag';
+      b.textContent = tag;
+      det.querySelector('summary').appendChild(b);
+    }
     renderSectionBody(det.querySelector('.secbody'), sc);
     if (sc.user_note) {
       const n = document.createElement('div');
@@ -1097,11 +1146,18 @@ async function openDetail(id, courseName) {
     ]));
   }
 
-  function addSec(title, emptyMsg, count) {
-    const div = document.createElement('div');
+  // 每一節都可以收合，而且預設收起。一堂課的詳細頁有錄音、投影片對照、
+  // 課中整理、手抄版、完整版、逐字稿六節，全部攤開要滑很久才找得到
+  // 想看的那一節。open=true 只留給「需要你動作」的那種（沒正常結束）。
+  function addSec(title, emptyMsg, count, open) {
+    const div = document.createElement('details');
     div.className = 'dsec';
-    const h = document.createElement('h3');
-    h.textContent = title;
+    div.open = !!open;
+    const h = document.createElement('summary');
+    const t = document.createElement('span');
+    t.className = 'dtitle';
+    t.textContent = title;
+    h.appendChild(t);
     if (count) {
       const n = document.createElement('span');
       n.className = 'n';
@@ -1109,14 +1165,19 @@ async function openDetail(id, courseName) {
       h.appendChild(n);
     }
     div.appendChild(h);
+    const body = document.createElement('div');
+    body.className = 'dbody';
+    div.appendChild(body);
     if (emptyMsg) {
       const e = document.createElement('span');
       e.className = 'empty';
       e.textContent = emptyMsg;
-      div.appendChild(e);
+      body.appendChild(e);
     }
     el.detailBody.appendChild(div);
-    return div;
+    // 回傳 body：呼叫端 appendChild 的東西要進到可收合的區域裡，
+    // 不是跟 summary 同層，否則收起來之後內容還留在畫面上
+    return body;
   }
   function btnRow(pairs) {
     const r = document.createElement('div');
