@@ -91,8 +91,13 @@ async def api_session(session_id: str):
         raise HTTPException(status_code=404, detail="session not found")
     import os
     audio = s.get("audio_path")
+    # 還在重連佇列裡的才接得回去。伺服器重啟過的話記憶體裡什麼都沒有，
+    # 只能收尾——這兩種情況前端要顯示不同的按鈕，不能讓使用者按了才發現。
+    live = ws_session.get_session(session_id)
     return {"session": s,
             "has_audio": bool(audio and os.path.exists(audio)),
+            "resumable": bool(live is not None and not live.ended
+                              and not s.get("ended_at")),
             "sections": storage.list_sections(session_id),
             "segments": storage.list_segments(session_id)}
 

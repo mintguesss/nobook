@@ -597,9 +597,15 @@ async def handle_connection(ws, course_id: str, engine, summarizer, llm,
                 session.ws = ws
                 session.paused = False
                 session.start_stats()
+                # next_seq：接回來的客戶端要從這個編號之後開始送。
+                # 頁面重開後 state.seq 會歸零，而伺服器用 seen_seqs 去重——
+                # 不給的話新送的音訊全部會被當成重複丟掉，錄音看起來在跑
+                # 但一個字都不會進來。
                 await session.send({"type": "session_started",
                                     "session_id": session.id,
-                                    "started_at": session.started_at})
+                                    "started_at": session.started_at,
+                                    "next_seq": (max(session.seen_seqs) + 1
+                                                 if session.seen_seqs else 0)})
                 continue
 
             if session is None:

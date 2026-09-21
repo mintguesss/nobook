@@ -195,6 +195,18 @@ def run(gate):
                        "WS：資料庫 sections 列數不增加",
                        "%d 列" % storage.count_sections(sid))
 
+            # 接回既有 session 時要拿到 next_seq ----------------------
+            # 沒有的話頁面重開後 seq 從 0 起算，全部撞上 seen_seqs 被丟掉
+            with client.websocket_connect(
+                    "/ws/session?course_id=ml-2026") as ws2:
+                ws2.send_json({"type": "resume", "session_id": sid})
+                evts = collect(ws2, until={"session_started"}, limit=50)
+                st = [e for e in evts if e["type"] == "session_started"]
+                gate.check(bool(st) and st[0].get("next_seq", 0) >= seq,
+                           "WS：resume 回傳 next_seq，接在已收過的編號之後",
+                           "next_seq=%s 已送到 seq=%d"
+                           % (st[0].get("next_seq") if st else None, seq))
+
             # pause / resume ------------------------------------------
             # 先把前一階段還在 ASR 佇列裡的音訊排乾。不排的話那些結果會
             # 在 pause 之後才回來，被誤判成「pause 期間產生的逐字稿」，

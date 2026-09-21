@@ -224,6 +224,12 @@ function handleEvent(msg) {
   switch (msg.type) {
     case 'session_started':
       state.sessionId = msg.session_id;
+      // 接回既有 session 時，seq 要接在伺服器看過的編號之後。
+      // 從 0 開始的話會全部撞上 seen_seqs 被當重複丟掉，
+      // 畫面上錄音正常在跑，但一句逐字稿都不會出現。
+      if (typeof msg.next_seq === 'number' && msg.next_seq > state.seq) {
+        state.seq = msg.next_seq;
+      }
       break;
     case 'segment':
       addSegment(msg);
@@ -864,6 +870,54 @@ function renderAlign(id, d, addSec, a) {
   }
 }
 
+// 接回一個還沒結束的 session：把已經有的逐字稿與段落倒回畫面，
+// 再用 resume 接上 WebSocket 繼續錄。
+// 不倒回內容的話畫面會是空的，看起來像重新開了一堂新的課。
+async function resumeSession(d) {
+  const sid = d.session.id;
+  try {
+    await startAudio();
+  } catch (e) {
+    alert('無法取得麥克風：' + e.message);
+    return;
+  }
+  await acquireWakeLock();
+
+  el.detail.classList.remove('show');
+  el.history.classList.remove('show');
+  el.overlay.classList.add('hide');
+
+  state.sessionId = sid;
+  state.courseId = d.session.course_id;
+  state.running = true;
+  state.ended = false;
+  state.paused = false;
+  state.sections.clear();
+  state.batches.clear();
+  el.summaries.innerHTML = '';
+  el.transcript.innerHTML = '';
+  updateSumBar();
+
+  el.course.textContent = d.courseName || d.session.course_id;
+  // 經過的時間照原本的開始時間算，不是從現在重新計時
+  state.startedAt = new Date(d.session.started_at).getTime();
+
+  for (const g of d.segments) {
+    addSegment({ start: g.start_s, text: g.text,
+                 avg_logprob: g.avg_logprob });
+  }
+  for (const sc of d.sections) {
+    addSummary({
+      section_id: sc.seq || sc.id, batch: sc.seq || sc.id,
+      title: sc.title, bullets: sc.bullets, summary: sc.summary,
+      groups: sc.groups, start: sc.start_s, end: sc.end_s,
+      user_note: sc.user_note,
+    });
+  }
+  toast(`接回 ${d.segments.length} 段逐字稿，繼續錄音`);
+  connect();
+}
+
 // 這段時間對到哪幾頁投影片，寫成「p8–p11」。多份教材就各寫一段。
 function slideTag(align, startS, endS) {
   if (!align || !align.pages) return '';
@@ -1010,6 +1064,7 @@ async function openDetail(id, courseName) {
     addSec('讀取失敗', e.message);
     return;
   }
+  d.courseName = courseName;
   const started = new Date(d.session.started_at);
   el.detailTitle.textContent =
     `${courseName} · ${started.toLocaleString('zh-TW', { dateStyle: 'short', timeStyle: 'short' })}`;
@@ -1032,10 +1087,25 @@ async function openDetail(id, courseName) {
   //     沒有這顆按鈕的話，那堂課永遠停在「未結束」，既不能繼續也不能結束。
   if (!d.session.ended_at) {
     const sec = addSec('這堂課沒有正常結束',
-                       `逐字稿有 ${d.segments.length} 段，可以直接收尾產生筆記`,
+                       d.resumable
+                         ? `逐字稿有 ${d.segments.length} 段。可以接回去繼續錄，`
+                           + '或直接收尾產生筆記'
+                         : `逐字稿有 ${d.segments.length} 段。伺服器重啟過，`
+                           + '接不回去了，只能收尾',
                        null, true);
+
+    // 手機睡著、網路斷掉之後回來，多半是想把剩下的課錄完，不是想結束。
+    // session 還在伺服器的重連佇列裡就接得回去。
+    if (d.resumable) {
+      const r = document.createElement('button');
+      r.className = 'primary';
+      r.textContent = '接續錄音';
+      r.addEventListener('click', () => resumeSession(d));
+      sec.appendChild(r);
+    }
+
     const b = document.createElement('button');
-    b.className = 'primary';
+    b.className = d.resumable ? '' : 'primary';
     b.textContent = '結束並產生筆記';
     b.addEventListener('click', async () => {
       b.disabled = true;
