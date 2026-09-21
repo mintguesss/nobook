@@ -65,7 +65,8 @@ class LectureSession:
         )
         # 規格 §10：原始音訊預設不保存；開了 LS_SAVE_AUDIO 才錄，
         # 用途是回頭確認 ASR 有沒有聽錯、以及日後換模型重跑
-        self.recorder = (audio_store.AudioRecorder(session_id)
+        self.recorder = (audio_store.AudioRecorder(session_id, course=course,
+                                                   started_at=self.started_at)
                          if config.SAVE_AUDIO else None)
         # 近似音自動修正：靠課程術語表把「電動成本」改回「變動成本」。
         # 每次修正都記下來，方便事後檢查有沒有改錯。

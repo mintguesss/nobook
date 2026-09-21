@@ -13,7 +13,7 @@ import logging
 import uuid
 from pathlib import Path
 
-from . import config, courses, export, storage, term_fix
+from . import audio_store, config, courses, export, storage, term_fix
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ def pick_rows(ids):
     return rows
 
 
-def concat_audio(rows, out_id: str):
+def concat_audio(rows, out_id: str, course=None):
     """把幾段 FLAC 接成一個檔。缺檔就跳過那一段，不讓整個合併失敗。
 
     回傳 (輸出路徑或 None, 每一段的起始秒數, 總長度秒數)。
@@ -73,7 +73,9 @@ def concat_audio(rows, out_id: str):
 
     out_dir = Path(config.AUDIO_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / ("%s.flac" % out_id)
+    # 合併檔的起始時間跟來源第一段一樣，不加後綴就會撞名
+    out_path = audio_store.build_filename(course, rows[0]["started_at"],
+                                          out_id, out_dir, suffix="合併")
     gap = np.zeros(int(GAP_S * config.SAMPLE_RATE), dtype="int16")
     offsets = {}
     written = 0
@@ -123,7 +125,7 @@ async def merge_sessions(ids, summarizer) -> dict:
     course = courses.get_course(rows[0]["course_id"])
     new_id = str(uuid.uuid4())
 
-    audio_path, offsets, written_s = concat_audio(rows, new_id)
+    audio_path, offsets, written_s = concat_audio(rows, new_id, course)
     if offsets is None:
         offsets, _ = _offsets_from_duration(rows)
     else:
