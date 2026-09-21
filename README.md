@@ -454,6 +454,41 @@ nobook/
 
 ---
 
+## 疑難排解
+
+### llama-server 起不來：Smart App Control
+
+Windows 11 的 Smart App Control（SAC）會擋掉沒有簽章的執行檔。
+llama.cpp 的官方 release **沒有簽章**（`Get-AuthenticodeSignature` 顯示
+`NotSigned`），所以 SAC 開著的機器一定擋。症狀是 `LLMUnavailable`、
+子行程起來就死，但 ASR 與逐字稿完全正常——那部分是 Python 行程內的推論，
+不經過子行程。
+
+先確認是不是這個原因：
+
+```powershell
+(Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy").VerifiedAndReputablePolicyState
+# 0=關閉  1=開啟  2=評估模式
+Get-AuthenticodeSignature .	ools\llama.cpp\llama-server.exe | Select-Object Status
+```
+
+兩條路：
+
+**關掉 SAC**：設定 → 隱私權與安全性 → Windows 安全性 → 應用程式與瀏覽器
+控制 → Smart App Control 設定 → 關閉。立即生效。
+**這是單向門**——Microsoft 明訂關閉後不重裝 Windows 就無法再開啟。
+公司或學校管理的機器可能被政策鎖住，選項會是灰的。
+（關掉的是 SAC，Defender 的即時防護不受影響。）
+
+**改接已簽章的推論後端**：Ollama、LM Studio 這類有簽章的程式 SAC 不擋。
+它們提供 OpenAI 相容的端點，設 `LS_LLAMA_HOST` / `LS_LLAMA_PORT` 指過去即可。
+模型可以用 Modelfile 匯入現有的 GGUF，不必重新下載——同一份權重，
+`bench.json` 的數字才還算數。注意本專案靠 `response_format: json_schema`
+把 schema 編成 grammar 來約束輸出，換後端前要確認它支援；不支援會自動降級
+成純 prompt 約束，不會壞掉但輸出品質會退步。
+
+---
+
 ## 已知風險（規格 §12）
 
 收音品質是**對準確度影響最大的單一變因，超過任何模型選擇**。
