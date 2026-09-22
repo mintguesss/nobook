@@ -1,4 +1,4 @@
-"""llama-server 客戶端與 prompt 組裝（規格 §6.3、§6.4）。"""
+﻿"""llama-server 客戶端與 prompt 組裝（規格 §6.3、§6.4）。"""
 from __future__ import annotations
 
 import json
@@ -154,8 +154,14 @@ WORKSHEET_REFLECT_TMPL = """你在幫一位**研究所學生**寫課堂學習單
 - **不要只是把老師講的換句話說。** 他自己抄逐字稿就好了。
 - **研究所的水準。** 不要寫「真的很驚人」「我覺得好方便」「原來如此」。
   不確定就寫成問題（「如果…那…是不是就…」），不要假裝有結論。
-- **每一則的開頭都要不一樣。** 同一種句型整欄最多出現一次。特別不要用
-  「我原本以為X，現在知道Y」這個模板，那是小學生的寫法。
+- **每一則的開頭都要不一樣。** 同一種句型整欄最多出現一次。
+- **「我原本以為X，但當Y時，我才發現Z」這個轉折整欄最多用一次。**
+  「我過去認為／我過去判斷」開頭、「我才發現／我才意識到」轉折、
+  「這讓我重新思考／開始質疑」收尾，全部算同一個模板。
+  實測不擋的話整欄八則會全部長一樣，只是換裡面的名詞。
+  但**不要因此就不寫「我」**——這一欄的主角還是你自己，
+  只是要換別的方式講：換掉判斷依據、指出自己漏看的條件、
+  發現兩件事被自己混為一談、承認某個判準什麼時候會失效。
 - **每一則都是完整的句子，要有句號。** 不要寫成「X 的 Y，取決於 Z」這種
   沒講完的名詞片語——抄到紙上看起來像半句話。
 - **句式要混著用**，整欄至少出現三種不同的形狀。可用的寫法包括：
@@ -185,7 +191,29 @@ WORKSHEET_AVOID_TMPL = """# 不可以重複
 WORKSHEET_RETRY_TMPL = """剛才那次有下面的問題：
 %s
 
-重寫這一欄。每一則換一種說法開場、換一個句型，長度控制在 %d 字以內。"""
+重寫這一欄。**上面那段「這一欄要做的事」完全不變**，一樣要照做——
+它要是說這一欄的主角是「我」，那每一則就還是要有「我」，不要改成純技術分析，
+那是別欄的工作，寫成那樣會跟別欄撞在一起整則被丟掉。
+
+問題不在於用了第一人稱，而在於**整欄用同一個轉折**。
+下面這些**整欄最多各出現一次**：
+%s
+
+要讓每一則的思考動作不一樣：有的是換掉判斷依據，有的是指出自己漏看了什麼條件，
+有的是發現兩件事被自己混為一談，有的是承認某個判準在什麼情況下會失效。
+用你自己的話把它寫完，不要套固定骨架。
+
+每一則 %d 到 %d 字。**不要為了避開重複就寫得又短又空**——
+字數是用來把推論寫完整的：原本的判斷依據是什麼、它在哪裡不夠、換成什麼才夠。"""
+
+
+# 實測模型最愛的那個模板：「我原本以為X，但當Y時，我才發現Z」。
+# 放寬字數之後更明顯——它剛好有空間把整個敘事骨架寫完。
+_BANNED_FRAMES = [
+    "「我原本以為…」「我過去以為／認為／判斷…」這種開場",
+    "「…，我才發現／我才意識到…」這種轉折",
+    "「這讓我重新思考／這讓我開始質疑…」這種收尾",
+]
 
 
 WORKSHEET_CHARS_DEFAULT = (40, 70)
@@ -357,8 +385,10 @@ def shape_signature(text: str):
 
 
 _FRAME_RE = re.compile(
-    r"我原本(以為|認為|覺得|想)|我本來以為|過去我以為|我一直以為|"
-    r"這讓我(覺得|發現|意識|想到)|讓我(覺得|發現)|我才(發現|知道)")
+    r"我原本(以為|認為|覺得|想|判斷)|我本來以為|過去我以為|我一直以為|"
+    r"我過去(以為|認為|覺得|想|判斷|將|把|都)|"
+    r"這讓我(覺得|發現|意識|想到|重新|開始)|讓我(覺得|發現)|"
+    r"我才(發現|知道|意識)")
 # 模型會替使用者編出他沒說過的個人經歷，那是要交出去的東西
 _FABRICATED_PAST_RE = re.compile(
     r"我(去年|前年|上學期|上一學期|大[一二三四]|以前|之前|曾經)[^，。]{0,12}"
@@ -366,15 +396,23 @@ _FABRICATED_PAST_RE = re.compile(
 
 
 def worksheet_quality_issues(points, max_chars: int = 95,
-                             repeat_limit: float = 0.34):
+                             repeat_limit: float = 0.34, min_chars: int = 0):
     """回傳這一欄要重寫的理由；沒問題就回空陣列。
 
     prompt 說「不要用同一個句型」模型照樣會用，所以要量出來。三件事：
     開頭重複、同一個心得句型反覆出現、以及句子長到手抄不完。
+
+    min_chars 是另一個方向的失敗：叫它避開某個句型之後，它會改寫成又短
+    又空的一句話交差——實測整欄從平均 99 字掉到 35 字，推論過程全部不見。
     """
     issues = []
     if len(points) < 2:
         return issues
+    if min_chars:
+        short = [x for x in points if len(x or "") < min_chars]
+        if len(short) > len(points) / 2:
+            issues.append("有 %d/%d 則不到 %d 字，推論過程沒寫出來"
+                          % (len(short), len(points), min_chars))
     head, n, ratio = repeated_openings(points)
     if ratio > repeat_limit:
         issues.append("有 %d/%d 則以「%s」開頭" % (n, len(points), head))
@@ -903,14 +941,16 @@ class Summarizer:
         except (KeyError, IndexError, TypeError):
             raise LLMUnavailable("llama-server 回應格式異常：%r" % (data,))
 
-    async def _chat_json(self, system: str, user: str, max_tokens: int, schema):
+    async def _chat_json(self, system: str, user: str, max_tokens: int, schema,
+                         temperature=None):
         """呼叫並解析 JSON；失敗重試一次並加上格式糾正提示（規格 §6.3）。
 
         回傳 (obj_or_None, raw_text)。
         """
         self.parse_attempts += 1
-        raw = await self._chat(system, user, max_tokens,
-                               config.SUMMARY_TEMPERATURE, schema)
+        if temperature is None:
+            temperature = config.SUMMARY_TEMPERATURE
+        raw = await self._chat(system, user, max_tokens, temperature, schema)
         obj = extract_json(raw)
         if obj is not None:
             return to_traditional(obj), raw
@@ -1182,14 +1222,15 @@ class Summarizer:
             clo, chi, avoid_block, sec["id"])
         schema = build_worksheet_schema([sec], with_exam=False, n_source=n_source)
 
-        async def run(user):
+        async def run(user, temperature=None):
             ctx = getattr(self.manager, "current_ctx", 0)
             want = max(900, int(hi * chi * TOKENS_PER_CHAR * 2.0))
             if ctx:
                 room = ctx - estimate_tokens(system + user) - 256
                 if room > 256:
                     want = min(want, room)
-            obj, _raw = await self._chat_json(system, user, max(256, want), schema)
+            obj, _raw = await self._chat_json(system, user, max(256, want),
+                                              schema, temperature)
             fields = (obj or {}).get("fields")
             vals = fields.get(sec["id"]) if isinstance(fields, dict) else None
             return [str(x).strip() for x in (vals or [])
@@ -1197,16 +1238,37 @@ class Summarizer:
 
         # 字數上限比要求的再寬一點，不然剛好寫到上限的那幾則會被判成抄不完
         cap = chi + 25
+        floor = int(clo * 0.7)
         pts = await run(base_user)
-        issues = worksheet_quality_issues(pts, max_chars=cap)
-        if issues:
-            log.warning("「%s」品質不合格，重寫一次：%s",
+        issues = worksheet_quality_issues(pts, max_chars=cap, min_chars=floor)
+        # 重寫兩次而不是一次：句型問題模型第一次常常照犯，而放寬字數之後
+        # 那個「我原本以為…我才發現…」的模板更容易整欄套滿。留最好的一次。
+        #
+        # 重寫時把溫度拉高。光靠 prompt 說「不要用同一個句型」擋不住——
+        # 實測兩次重寫的輸出跟第一次幾乎一模一樣，因為在低溫下那個模板
+        # 就是這個模型對「反思」最高機率的寫法。
+        for i in range(2):
+            if not issues:
+                break
+            log.warning("「%s」品質不合格，重寫：%s",
                         sec["title"], "；".join(issues))
+            banned = list(_BANNED_FRAMES)
+            head, n, _ratio = repeated_openings(pts)
+            if head:
+                banned.append("以「%s」開頭" % head)
             retry = await run(base_user + "\n\n" + WORKSHEET_RETRY_TMPL
-                              % ("\n".join("- " + x for x in issues), chi))
-            if retry and len(worksheet_quality_issues(
-                    retry, max_chars=cap)) < len(issues):
-                pts = retry
+                              % ("\n".join("- " + x for x in issues),
+                                 "\n".join("- " + x for x in banned),
+                                 clo, chi),
+                              temperature=min(1.0, config.SUMMARY_TEMPERATURE
+                                              + 0.3 * (i + 1)))
+            if not retry:
+                break
+            retry_issues = worksheet_quality_issues(retry, max_chars=cap,
+                                                    min_chars=floor)
+            if len(retry_issues) >= len(issues):
+                break
+            pts, issues = retry, retry_issues
         fake = fabricated_past(pts)
         if fake:
             # 編造的個人經歷一律不留：這份是要交給老師的
