@@ -108,23 +108,32 @@ SAMPLE_PROMPT = (
 
 
 def _stray_llama_servers():
-    """找出不是我們啟的 llama-server 行程。"""
+    """找出不是我們啟的 llama-server 行程。
+
+    只認 tools/llama.cpp 底下那一支。Ollama 的推論行程**檔名也叫
+    llama-server.exe**，照映像名稱抓會把它一起算進來，於是在有裝 Ollama
+    的機器上這道閘門永遠過不了。
+    """
     import subprocess as sp
     if sys.platform != "win32":
         return []
     try:
-        out = sp.run(["tasklist", "/FI", "IMAGENAME eq llama-server.exe", "/NH"],
-                     capture_output=True, text=True, timeout=15).stdout
+        out = sp.run(["powershell", "-NoProfile", "-Command",
+                      "Get-Process llama-server -ErrorAction SilentlyContinue"
+                      " | ForEach-Object { \"$($_.Id)`t$($_.Path)\" }"],
+                     capture_output=True, text=True, timeout=20).stdout
     except (sp.SubprocessError, OSError):
         return []
+    ours = str(config.LLAMA_SERVER_BIN).lower()
     pids = []
     for line in out.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[0].lower().startswith("llama-server"):
-            try:
-                pids.append(int(parts[1]))
-            except ValueError:
-                pass
+        parts = line.strip().split("\t", 1)
+        if len(parts) != 2 or parts[1].strip().lower() != ours:
+            continue
+        try:
+            pids.append(int(parts[0]))
+        except ValueError:
+            pass
     return pids
 
 

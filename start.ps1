@@ -43,7 +43,11 @@ if (Test-Path $bench) {
 }
 
 # 2. 殘留的 llama-server 會佔住 VRAM 與 port
-$stray = @(Get-Process llama-server -ErrorAction SilentlyContinue)
+#    只認我們自己那一支：Ollama 的推論行程檔名也叫 llama-server.exe，
+#    照名稱抓會把它一起殺掉。
+$ourLlama = Join-Path $root "tools\llama.cpp\llama-server.exe"
+$stray = @(Get-Process llama-server -ErrorAction SilentlyContinue |
+           Where-Object { $_.Path -eq $ourLlama })
 if ($stray.Count -eq 0) {
     Ok "沒有殘留的 llama-server" | Out-Null
 } else {
@@ -125,6 +129,7 @@ try {
 } finally {
     Pop-Location
     & $tailscale serve --https=443 off 2>&1 | Out-Null
-    Get-Process llama-server -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process llama-server -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -eq $ourLlama } | Stop-Process -Force
     Write-Host "`n已停止服務並收掉 Tailscale Serve。" -ForegroundColor DarkGray
 }
