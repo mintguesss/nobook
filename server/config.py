@@ -50,6 +50,9 @@ LLAMA_HOST = os.getenv("LS_LLAMA_HOST", "127.0.0.1")
 LLAMA_PORT = int(os.getenv("LS_LLAMA_PORT", "8080"))
 LLAMA_BASE_URL = f"http://{LLAMA_HOST}:{LLAMA_PORT}"
 LLAMA_STARTUP_TIMEOUT_S = float(os.getenv("LS_LLAMA_STARTUP_TIMEOUT_S", "120"))
+# 沒有進行中的課且閒置超過這麼久，就把 llama-server 關掉還出 VRAM。
+# 冷啟動約 3 秒，代價只有閒置後第一次按鈕會多等一下。設 0 關掉這個行為。
+LLAMA_IDLE_UNLOAD_S = float(os.getenv("LS_LLAMA_IDLE_UNLOAD_S", "600"))
 
 # ── 音訊 / VAD 切段（規格 §4.2）────────────────────────────────────────
 SAMPLE_RATE = 16000

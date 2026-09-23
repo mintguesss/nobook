@@ -64,6 +64,7 @@ class LLMManager:
         self.last_switch_s = 0.0
         self.no_think_flag_ok = False
         self.current_ctx = 0          # 供 summarizer 算 max_tokens 用
+        self.last_used = time.monotonic()   # 閒置卸載的計時基準
 
     # 查詢 -------------------------------------------------------------
     @property
@@ -85,6 +86,7 @@ class LLMManager:
     # 生命週期 ---------------------------------------------------------
     async def ensure(self, model_key: str) -> None:
         """確保指定模型正在服務中。若當前是別的模型，先關閉再啟動。"""
+        self.last_used = time.monotonic()
         async with self._lock:
             if self._current == model_key and self.alive and await self._healthy():
                 return
@@ -99,6 +101,27 @@ class LLMManager:
     async def shutdown(self) -> None:
         async with self._lock:
             await self._stop_locked()
+
+    async def unload_if_idle(self, idle_s: float) -> bool:
+        """閒置夠久就把 llama-server 關掉，把 VRAM 還出去。
+
+        原本的設計是常駐到行程結束，因為同一張卡不會拿來做別的。但機器上
+        裝了別的推論工具（Ollama 之類）之後，課上完還佔著 4~6 GB 就變成
+        在跟人搶卡。冷啟動實測約 3 秒，下次要用再拉起來就好。
+
+        呼叫端負責確認沒有進行中的課。
+        """
+        if idle_s <= 0 or not self.alive:
+            return False
+        if time.monotonic() - self.last_used < idle_s:
+            return False
+        async with self._lock:
+            # 等鎖的時候可能有人用了，再確認一次
+            if not self.alive or time.monotonic() - self.last_used < idle_s:
+                return False
+            log.info("llama-server 閒置超過 %.0f 秒，卸載以釋放 VRAM", idle_s)
+            await self._stop_locked()
+        return True
 
     async def _start_locked(self, model_key, choice) -> None:
         model_path = choice.resolve_model_path()

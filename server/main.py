@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 
 from fastapi import Body, FastAPI, HTTPException, Query, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
@@ -24,6 +25,25 @@ log = logging.getLogger("nobook")
 state = {"engine": None, "llm": None, "summarizer": None, "bench": None}
 
 
+async def _idle_unload_loop(llm) -> None:
+    """課上完之後把 llama-server 佔的 VRAM 還出去。
+
+    有進行中的課就不動——課中按鈕之間本來就會隔很久，那不叫閒置。
+    """
+    idle_s = config.LLAMA_IDLE_UNLOAD_S
+    if idle_s <= 0:
+        return
+    while True:
+        await asyncio.sleep(min(60.0, idle_s / 2))
+        try:
+            if ws_session.all_sessions():
+                llm.last_used = time.monotonic()
+                continue
+            await llm.unload_if_idle(idle_s)
+        except Exception as e:     # 這條路掛掉不能影響服務
+            log.warning("閒置卸載檢查失敗：%s", e)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     # 規格 §14.1：bench.json 不存在就拒絕啟動
@@ -40,9 +60,13 @@ async def lifespan(app: FastAPI):
     log.info("課中摘要模型：%s", inclass.model if inclass else "（未選型，摘要停用）")
     # 先把 silero-vad 載進來，第一堂課的第一段才不會多等模型載入
     asyncio.get_running_loop().run_in_executor(None, audio_pipeline.default_vad)
+    idle_task = asyncio.create_task(_idle_unload_loop(llm))
     try:
         yield
     finally:
+        idle_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await idle_task
         with contextlib.suppress(Exception):
             await llm.shutdown()
         with contextlib.suppress(Exception):
