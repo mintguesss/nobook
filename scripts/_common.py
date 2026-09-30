@@ -14,7 +14,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-BENCH_PATH = ROOT / "data" / "bench.json"
+# 跟 server/config.py 一樣：這台有自己的 bench.<電腦名稱>.json 就讀寫它
+from server.config import BENCH_PATH  # noqa: E402
 
 # Windows 主控台預設 cp950，中文輸出會變亂碼
 for _stream in (sys.stdout, sys.stderr):

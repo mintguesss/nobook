@@ -19,7 +19,22 @@ COURSES_DIR = ROOT / "courses"
 # 上課用的投影片／講義丟這裡，系統自己去對應是哪一堂、對到第幾頁
 MATERIALS_DIR = Path(os.getenv("LS_MATERIALS_DIR", ROOT / "materials"))
 WEB_DIR = ROOT / "web"
-BENCH_PATH = DATA_DIR / "bench.json"
+def _bench_path() -> Path:
+    """這台機器的 bench 檔。
+
+    bench.json 是「在這台顯卡上量出來的」，每台都不一樣——模型選型、ctx、
+    VRAM 門檻，還有 ASR 模型的絕對路徑。放在 git 裡共用的話，一台推上去
+    另一台拉下來就壞了（實測：實驗室推了 4070 Ti 的 bench，家裡的 4060
+    拉下來之後 ASR 路徑指到 D 槽，伺服器起不來）。
+    所以 data/bench.<電腦名稱>.json 存在就優先用它，沒有才用共用的 bench.json。
+    """
+    import socket
+    host = os.environ.get("COMPUTERNAME") or socket.gethostname()
+    own = DATA_DIR / ("bench.%s.json" % host)
+    return own if own.exists() else DATA_DIR / "bench.json"
+
+
+BENCH_PATH = _bench_path()
 DB_PATH = Path(os.getenv("LS_DB_PATH", DATA_DIR / "lecture.db"))
 
 # ── 服務 ────────────────────────────────────────────────────────────────
@@ -92,7 +107,7 @@ STATS_INTERVAL_S = float(os.getenv("LS_STATS_INTERVAL_S", "5"))
 
 # ── 其他 ───────────────────────────────────────────────────────────────
 SAVE_AUDIO = os.getenv("LS_SAVE_AUDIO", "0") == "1"   # §10：預設不保存原始音訊
-AUDIO_DIR = DATA_DIR / "audio"
+AUDIO_DIR = Path(os.getenv("LS_AUDIO_DIR", DATA_DIR / "audio"))
 
 
 class BenchMissingError(RuntimeError):
@@ -154,6 +169,9 @@ class Bench:
         p = Path(model)
         if not p.is_absolute() and (MODELS_DIR / model).exists():
             return str(MODELS_DIR / model)
+        # 絕對路徑是量測那台機器的位置，換台就不存在了——退回本機 models/ 找同名的
+        if p.is_absolute() and not p.exists() and (MODELS_DIR / p.name).exists():
+            return str(MODELS_DIR / p.name)
         return str(p)
 
     @property

@@ -25,7 +25,7 @@ from pathlib import Path
 
 from _common import Gate, header
 
-from server import config, courses, export, storage, term_fix
+from server import audio_store, config, courses, export, storage, term_fix
 from server.audio_pipeline import AudioPipeline
 from server.llm_manager import LLMManager, LLMUnavailable
 from server.summarizer import Summarizer
@@ -44,6 +44,26 @@ def server_running() -> bool:
             return True
     except Exception:
         return False
+
+
+def _existing_copy(audio_dir: Path, src: Path):
+    """同一個錄音已經複製過（--force 重跑時）就沿用，不要再多存一份。"""
+    size = src.stat().st_size
+    for f in audio_dir.rglob("*.flac"):
+        try:
+            if f.stat().st_size == size and f.name.split(".")[0] and                     _same_file(f, src):
+                return f
+        except OSError:
+            continue
+    return None
+
+
+def _same_file(a: Path, b: Path) -> bool:
+    import hashlib
+    def head(p):
+        with open(p, "rb") as fh:
+            return hashlib.sha1(fh.read(1 << 20)).hexdigest()
+    return head(a) == head(b)
 
 
 def load_flac(path: Path):
@@ -159,11 +179,14 @@ async def main_async(args) -> int:
             print("\n  %s  %s  %s  %.0f 分鐘"
                   % (e["id"][:8], e["started_at"][5:16], course.name,
                      (e.get("duration_s") or 0) / 60), flush=True)
-            dst = audio_dir / e["file"]
-            if not dst.exists():
-                shutil.copy2(flac, dst)
             if storage.get_session(e["id"]):
                 storage.delete_session(e["id"])      # --force：整筆重建
+            # 錄音照這台的命名規則放：<課名>/<日期_時間>.flac，跟上課時錄的一致
+            dst = _existing_copy(audio_dir, flac) or audio_store.build_filename(
+                course, e["started_at"], e["id"])
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if not dst.exists():
+                shutil.copy2(flac, dst)
             storage.create_session(e["id"], course.id, e["started_at"])
             audio = load_flac(dst)
             cnt, secs = await transcribe(e, course, audio, engine)
