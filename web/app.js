@@ -24,6 +24,9 @@ const el = {
   final: $('final'), finalMd: $('final-md'), finalTitle: $('final-title'),
   history: $('history'), historyList: $('history-list'),
   notes: $('notes'), copyView: $('copy-view'), copyBody: $('copy-body'),
+  notesOpen: $('notes-open'),
+  selectBar: $('select-bar'), selectCount: $('select-count'),
+  selectWhy: $('select-why'), selectMerge: $('select-merge'),
   sumBar: $('sumbar'), sumCount: $('sumcount'), sumToggle: $('sum-toggle'),
   copyCount: $('copy-count'),
   detail: $('detail'), detailBody: $('detail-body'), detailTitle: $('detail-title'),
@@ -37,7 +40,11 @@ const state = {
   autoScroll: true, retries: 0,
   wakeLock: null, ctx: null, node: null, stream: null,
   hiddenAt: 0, gaps: [], viewingSession: null,
-  notesBusy: false, notesMd: '', endingTimer: null, finalReady: null,
+  notesBusy: false, notesMd: '', notesSections: 0, notesCheck: null,
+  endingTimer: null, finalReady: null,
+  // 歷史清單的多選（長按進入）。合併的入口從清單頂端的區塊改到這裡——
+  // 放在頂端的話，要合併哪幾段是系統幫你決定的，使用者沒得挑。
+  selecting: false, selected: new Set(), rowsById: new Map(),
   sections: new Map(), batches: new Map(), markBusy: false, finalMd: '',
 };
 
@@ -163,6 +170,31 @@ function wsUrl() {
   return `${proto}//${location.host}/ws/session?course_id=${encodeURIComponent(state.courseId)}`;
 }
 
+// session id 要撐過頁面重載。只存在記憶體的話，平板一重新整理（或被
+// 系統回收後重開）就認不得自己剛剛在錄哪一堂，那堂課會變成孤兒——
+// 伺服器端還活著，但前端再也接不回去，只能重開一堂。
+const SID_KEY = 'nobook.live';
+function rememberSession() {
+  try {
+    if (state.sessionId && !state.ended) {
+      localStorage.setItem(SID_KEY, JSON.stringify(
+        { id: state.sessionId, course: state.courseId, at: Date.now() }));
+    } else {
+      localStorage.removeItem(SID_KEY);
+    }
+  } catch (e) { /* 無痕模式之類沒有 localStorage，不影響錄音 */ }
+}
+function recallSession() {
+  try {
+    const raw = localStorage.getItem(SID_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    // 放太久的多半是忘了收尾的舊紀錄，別自動接回去嚇人
+    if (!v || !v.id || Date.now() - (v.at || 0) > 12 * 3600 * 1000) return null;
+    return v;
+  } catch (e) { return null; }
+}
+
 function connect() {
   setLight(state.sessionId ? 'warn' : 'bad');
   const ws = new WebSocket(wsUrl());
@@ -224,6 +256,7 @@ function handleEvent(msg) {
   switch (msg.type) {
     case 'session_started':
       state.sessionId = msg.session_id;
+      rememberSession();
       // 接回既有 session 時，seq 要接在伺服器看過的編號之後。
       // 從 0 開始的話會全部撞上 seen_seqs 被當重複丟掉，
       // 畫面上錄音正常在跑，但一句逐字稿都不會出現。
@@ -576,6 +609,7 @@ function goHome() {
   state.ended = false;
   state.paused = false;
   state.sessionId = null;
+  rememberSession();
   state.seq = 0;
   state.pending = [];
   state.sections.clear();
@@ -607,6 +641,11 @@ function goHome() {
   el.history.classList.remove('show');
   el.overlay.classList.remove('hide');
   el.start.disabled = false;
+  // 上一堂的手抄版不要留到下一堂
+  state.notesMd = '';
+  state.notesSections = 0;
+  state.notesCheck = null;
+  el.notesOpen.hidden = true;
   loadCourses();
 }
 
@@ -630,7 +669,12 @@ function requestNotes() {
 }
 
 function showHandcopy(md, nSections, check) {
+  // 存起來才能關掉之後再打開。不存的話唯一的重看方式是「重新產生」，
+  // 那要再等模型跑一輪，而且內容還會跟手上抄到一半的不一樣。
   state.notesMd = md;
+  state.notesSections = nSections;
+  state.notesCheck = check;
+  el.notesOpen.hidden = false;
   const wrap = el.copyBody;
   wrap.innerHTML = '';
   let ul = null;
@@ -720,6 +764,7 @@ function renderCheck(wrap, check) {
 // ── 歷史筆記（規格 §10 的資料都在，只是原本沒有介面看）────────────────
 async function openHistory() {
   el.history.classList.add('show');
+  exitSelect();
   showBuild();
   el.historyList.innerHTML = '';
   showUsage();
@@ -735,7 +780,7 @@ async function openHistory() {
     for (const c of await (await fetch('/api/courses')).json()) courses.set(c.id, c.name);
   } catch (e) { /* 課名拿不到就顯示 id */ }
 
-  await renderMergeGroups(courses);
+  state.rowsById.clear();
 
   // 照課名分資料夾。一門課上十八週就是十八筆，平鋪的話找上禮拜那堂
   // 要滑很久；而且同一門課的紀錄本來就該放在一起看。
@@ -779,17 +824,30 @@ function historyRow(r, courseName) {
   if (mergedN) dur += ` · 合併 ${mergedN} 段`;
   const done = !!r.ended_at;
   btn.innerHTML =
-    '<span class="hmain"><span class="hcourse"></span>' +
+    '<span class="hpick" aria-hidden="true"></span>' +
+    '<span class="hmain"><span class="hcourse">' +
+    '<span class="htime"></span><span class="hnote"></span></span>' +
     '<span class="hmeta"></span></span>' +
     `<span class="hbadge${done ? ' done' : ''}"></span>`;
-  btn.querySelector('.hcourse').textContent =
+  btn.querySelector('.htime').textContent =
     started.toLocaleString('zh-TW', { dateStyle: 'short', timeStyle: 'short' });
+  // 備註接在時間後面：同一天同一門課錄好幾段，時間本身認不出是哪一段
+  btn.querySelector('.hnote').textContent = r.note ? ' · ' + r.note : '';
   btn.querySelector('.hmeta').textContent = dur;
   btn.querySelector('.hbadge').textContent = done ? '已完成' : '未結束';
-  btn.addEventListener('click', () => openDetail(r.id, courseName));
+  btn.addEventListener('click', () => {
+    if (state.selecting) { toggleSelect(r); return; }
+    openDetail(r.id, courseName);
+  });
+  bindLongPress(btn, () => {
+    if (!state.selecting) startSelect();
+    toggleSelect(r);
+  });
 
   const live = state.running && !state.ended && r.id === state.sessionId;
   if (live) btn.querySelector('.hbadge').textContent = '錄音中';
+  state.rowsById.set(r.id, r);
+  if (state.selected.has(r.id)) btn.parentElement?.classList.add('picked');
 
   const del = document.createElement('button');
   del.className = 'hdel';
@@ -809,9 +867,121 @@ function historyRow(r, courseName) {
 
   const wrap = document.createElement('div');
   wrap.className = 'hitem';
+  if (state.selected.has(r.id)) wrap.classList.add('picked');
+  wrap.dataset.sid = r.id;
   wrap.appendChild(btn);
   wrap.appendChild(del);
   return wrap;
+}
+
+// ── 歷史清單的多選與合併 ──────────────────────────────────────────────
+// 長按進入選取模式，左邊出現圓圈。合併只在「同一門課、同一天」之間
+// 成立——跨課或跨天接起來，時間軸跟筆記都沒有意義。
+function bindLongPress(node, fn) {
+  let timer = null;
+  let moved = false;
+  const start = () => {
+    moved = false;
+    timer = setTimeout(() => { timer = null; if (!moved) fn(); }, 480);
+  };
+  const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  node.addEventListener('touchstart', start, { passive: true });
+  node.addEventListener('touchmove', () => { moved = true; cancel(); },
+                        { passive: true });
+  node.addEventListener('touchend', cancel);
+  node.addEventListener('touchcancel', cancel);
+  node.addEventListener('mousedown', start);
+  node.addEventListener('mousemove', () => { moved = true; cancel(); });
+  node.addEventListener('mouseup', cancel);
+  node.addEventListener('mouseleave', cancel);
+  // 長按在桌面瀏覽器會跳出右鍵選單，蓋住剛出現的圓圈
+  node.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+function startSelect() {
+  state.selecting = true;
+  state.selected.clear();
+  el.history.classList.add('selecting');
+}
+
+function exitSelect() {
+  state.selecting = false;
+  state.selected.clear();
+  el.history.classList.remove('selecting');
+  el.historyList.querySelectorAll('.hitem.picked')
+    .forEach((n) => n.classList.remove('picked'));
+  updateSelectBar();
+}
+
+function toggleSelect(r) {
+  if (state.selected.has(r.id)) state.selected.delete(r.id);
+  else state.selected.add(r.id);
+  const node = el.historyList.querySelector(`.hitem[data-sid="${r.id}"]`);
+  if (node) node.classList.toggle('picked', state.selected.has(r.id));
+  if (!state.selected.size) { exitSelect(); return; }
+  updateSelectBar();
+}
+
+/** 選到的這幾筆能不能合併：同課、同日、至少兩筆、都已結束。 */
+function mergeability() {
+  const rows = [...state.selected].map((id) => state.rowsById.get(id))
+    .filter(Boolean);
+  if (rows.length < 2) return { ok: false, why: '選兩筆以上才能合併' };
+  const course = rows[0].course_id;
+  const day = (rows[0].started_at || '').slice(0, 10);
+  if (rows.some((r) => r.course_id !== course)) {
+    return { ok: false, why: '只能合併同一門課' };
+  }
+  if (rows.some((r) => (r.started_at || '').slice(0, 10) !== day)) {
+    return { ok: false, why: '只能合併同一天' };
+  }
+  const open = rows.filter((r) => !r.ended_at);
+  if (open.length) {
+    return { ok: false, why: `有 ${open.length} 筆還沒結束，要先收尾` };
+  }
+  return { ok: true, rows };
+}
+
+function updateSelectBar() {
+  const bar = el.selectBar;
+  if (!state.selecting || !state.selected.size) { bar.classList.remove('show'); return; }
+  bar.classList.add('show');
+  const m = mergeability();
+  el.selectCount.textContent = `已選 ${state.selected.size} 筆`;
+  el.selectWhy.textContent = m.ok ? '' : m.why;
+  el.selectMerge.disabled = !m.ok;
+}
+
+async function mergeSelected() {
+  const m = mergeability();
+  if (!m.ok) return;
+  const mins = Math.round(
+    m.rows.reduce((s, r) => s + (r.duration_s || 0), 0) / 60);
+  if (!confirm(`把選到的 ${m.rows.length} 段接成一堂並重新產生總筆記？
+共約 ${mins} 分鐘。原本那幾筆不會被刪掉，合併後會多一筆新紀錄。
+錄音檔也會接起來，過程約三到五分鐘。`)) return;
+  el.selectMerge.disabled = true;
+  el.selectMerge.textContent = '合併中…';
+  try {
+    const ids = m.rows
+      .sort((a, b) => (a.started_at || '').localeCompare(b.started_at || ''))
+      .map((r) => r.id);
+    const res = await fetch('/api/sessions/merge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.detail || ('HTTP ' + res.status));
+    toast(`已合併：${j.sections} 段、${j.chars} 字`);
+    exitSelect();
+    openHistory();
+  } catch (e) {
+    toast('合併失敗：' + e.message);
+  } finally {
+    el.selectMerge.textContent = '合併';
+    updateSelectBar();
+  }
 }
 
 // 投影片對照：把逐字稿對到教材的頁碼。
@@ -981,62 +1151,6 @@ async function showBuild() {
 }
 
 // 同一天被拆成好幾段錄的課，合併成一堂重新產生總筆記
-async function renderMergeGroups(courses) {
-  let groups = [];
-  try {
-    groups = await (await fetch('/api/merge/groups')).json();
-  } catch (e) { return; }
-  if (!groups.length) return;
-  const box = document.createElement('div');
-  box.className = 'mergebox';
-  const h = document.createElement('div');
-  h.className = 'mergehead';
-  h.textContent = '同一天分成好幾段錄的課，可以合併成一堂';
-  box.appendChild(h);
-  for (const g of groups) {
-    const row = document.createElement('div');
-    row.className = 'hitem';
-    const label = document.createElement('span');
-    label.className = 'hmain';
-    const t = document.createElement('span');
-    t.className = 'mtitle';
-    t.textContent = courses.get(g.course_id) || g.course_id;
-    const m = document.createElement('span');
-    m.className = 'mmeta';
-    m.textContent = `${g.date} · ${g.count} 段 · 共 ${Math.round(g.total_s / 60)} 分鐘`;
-    label.appendChild(t);
-    label.appendChild(m);
-    const btn = document.createElement('button');
-    btn.className = 'hmerge';
-    btn.textContent = '合併';
-    btn.addEventListener('click', async () => {
-      if (!confirm(`把這 ${g.count} 段接成一堂並重新產生總筆記？
-原本那幾筆不會被刪掉，合併後會多一筆新紀錄。
-錄音檔也會接起來，過程約三到五分鐘。`)) return;
-      btn.disabled = true;
-      btn.textContent = '合併中…';
-      try {
-        const res = await fetch('/api/sessions/merge', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids: g.ids }),
-        });
-        const j = await res.json();
-        if (!res.ok) throw new Error(j.detail || ('HTTP ' + res.status));
-        toast(`已合併：${j.sections} 段、${j.chars} 字`);
-        openHistory();
-      } catch (e) {
-        toast('合併失敗：' + e.message);
-        btn.disabled = false;
-        btn.textContent = '合併';
-      }
-    });
-    row.appendChild(label);
-    row.appendChild(btn);
-    box.appendChild(row);
-  }
-  el.historyList.appendChild(box);
-}
 
 async function showUsage() {
   const bar = $('usage');
@@ -1073,6 +1187,39 @@ async function openDetail(id, courseName) {
   el.detailTitle.textContent =
     `${courseName} · ${started.toLocaleString('zh-TW', { dateStyle: 'short', timeStyle: 'short' })}`;
   el.detailBody.innerHTML = '';
+
+  // 0. 備註。同一天同一門課錄好幾段，回頭找的時候只看時間認不出哪段是哪段。
+  {
+    const sec = addSec('備註', null);
+    const row = document.createElement('div');
+    row.className = 'noterow';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.placeholder = '例如：補課、分組討論、老師講考試範圍';
+    inp.value = d.session.note || '';
+    inp.maxLength = 40;
+    const save = document.createElement('button');
+    save.className = 'act';
+    save.textContent = '儲存';
+    const commit = async () => {
+      save.disabled = true;
+      try {
+        const res = await fetch(`/api/sessions/${id}/note`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ note: inp.value }),
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        toast('備註已存');
+      } catch (e) { toast('備註儲存失敗：' + e.message); }
+      save.disabled = false;
+    };
+    save.addEventListener('click', commit);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') commit(); });
+    row.appendChild(inp);
+    row.appendChild(save);
+    sec.appendChild(row);
+  }
 
   // 1. 錄音
   if (d.has_audio) {
@@ -1299,6 +1446,11 @@ $('open-history').addEventListener('click', openHistory);
 $('hist-top').addEventListener('click', openHistory);
 el.notes.addEventListener('click', requestNotes);
 $('copy-close').addEventListener('click', () => el.copyView.classList.remove('show'));
+el.notesOpen.addEventListener('click', () => {
+  if (state.notesMd) showHandcopy(state.notesMd, state.notesSections, state.notesCheck);
+});
+$('select-cancel').addEventListener('click', exitSelect);
+el.selectMerge.addEventListener('click', mergeSelected);
 $('copy-refresh').addEventListener('click', requestNotes);
 $('copy-dl-md').addEventListener('click', () => {
   const id = state.viewingSession || state.sessionId;
@@ -1314,7 +1466,10 @@ $('copy-text').addEventListener('click', async () => {
     toast('已複製');
   } catch (e) { toast('複製失敗：' + e.message); }
 });
-$('history-close').addEventListener('click', () => el.history.classList.remove('show'));
+$('history-close').addEventListener('click', () => {
+  exitSelect();
+  el.history.classList.remove('show');
+});
 $('detail-close').addEventListener('click', () => {
   el.detail.classList.remove('show');
   if (el.history.classList.contains('show')) openHistory();
@@ -1380,10 +1535,21 @@ if ('serviceWorker' in navigator) {
       const w = reg.installing;
       if (!w) return;
       w.addEventListener('statechange', () => {
-        if (w.state === 'installed' && navigator.serviceWorker.controller) {
-          toast('已更新到新版本，正在重新載入…');
-          setTimeout(() => location.reload(), 800);
+        if (w.state !== 'installed' || !navigator.serviceWorker.controller) return;
+        // 錄音中絕對不能自動重載。實測在課堂中途更新版本，平板會直接
+        // 重新整理，那堂課就變成孤兒——伺服器端還活著，但前端認不回去。
+        // 等這堂結束再換版，課比版本新舊重要。
+        if (state.running && !state.ended) {
+          toast('有新版本，這堂課結束後會自動更新', 5000);
+          const wait = setInterval(() => {
+            if (state.running && !state.ended) return;
+            clearInterval(wait);
+            location.reload();
+          }, 5000);
+          return;
         }
+        toast('已更新到新版本，正在重新載入…');
+        setTimeout(() => location.reload(), 800);
       });
     });
     reg.update();
@@ -1391,3 +1557,20 @@ if ('serviceWorker' in navigator) {
 }
 
 loadCourses();
+
+// 頁面重載後把剛才那堂接回來。沒有這段的話，重載一次就等於把課丟了：
+// 伺服器端 session 還在重連佇列裡，但前端不知道自己剛剛在錄哪一堂。
+(async function recoverLive() {
+  const v = recallSession();
+  if (!v) return;
+  try {
+    const d = await (await fetch(`/api/sessions/${v.id}`)).json();
+    if (!d || !d.resumable) { rememberSession(); return; }
+    const secs = d.session.duration_s
+      || (d.segments.length ? d.segments[d.segments.length - 1].end : 0);
+    const name = d.session.note || d.session.course_id;
+    if (!confirm(`剛才那堂「${name}」還在錄（已 ${Math.round(secs / 60)} 分鐘），要接回去繼續嗎？
+選取消的話它會留在歷史紀錄裡，之後可以再收尾。`)) return;
+    resumeSession(d);
+  } catch (e) { /* 接不回去就算了，資料還在資料庫裡 */ }
+})();

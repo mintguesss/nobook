@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
@@ -51,7 +51,10 @@
 
   /* 主體 ---------------------------------------------------------- */
   main { flex: 1; display: flex; min-height: 0; flex-direction: column; }
-  @media (orientation: landscape) { main { flex-direction: row; } }
+  /* 分兩欄的條件是「夠寬」，不是 orientation。分割螢幕的視窗常常是
+     矮而寬，orientation 照樣回報 landscape，於是側欄被擠進 300px 裡，
+     兩邊都不能看。用寬度判斷，窄的時候就乖乖上下疊。 */
+  @media (min-width: 720px) { main { flex-direction: row; } }
 
   #transcript-wrap { position: relative; flex: 1 1 auto; min-height: 0; }
   #transcript {
@@ -140,6 +143,43 @@
   .cfold .hrow { padding-left: 30px; }
   .cfold .hcourse { font-weight: 500; font-size: 14px; }
 
+  /* 多選：長按進入，左邊長出圓圈。沒進選取模式時圓圈完全不佔空間，
+     不然整個清單會為了一個平常用不到的控制項往右縮排。 */
+  .hpick { display: none; flex: none; }
+  #history.selecting .hpick {
+    display: block; width: 20px; height: 20px; border-radius: 50%;
+    border: 2px solid var(--fg-dim); margin-right: 2px;
+  }
+  #history.selecting .hitem.picked .hpick {
+    border-color: var(--accent); background: var(--accent);
+    box-shadow: inset 0 0 0 3px var(--panel);
+  }
+  #history.selecting .hitem.picked { background: rgba(77, 163, 255, .10); }
+  #history.selecting .hdel { display: none; }
+  .hnote { color: var(--accent); font-weight: 500; }
+  .noterow { display: flex; gap: 8px; align-items: center; }
+  .noterow input {
+    flex: 1; min-width: 0; padding: 9px 11px; border-radius: 8px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--fg); font: inherit; font-size: 14px;
+  }
+  .noterow input:focus { outline: none; border-color: var(--accent); }
+
+  #select-bar {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+    display: none; align-items: center; gap: 12px;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    background: var(--panel); border-top: 1px solid var(--line);
+  }
+  #select-bar.show { display: flex; }
+  #select-why { color: var(--warn); font-size: 12px; }
+  #select-bar .spacer { margin-left: auto; }
+  #select-merge {
+    background: var(--accent); color: #06121f; border: none;
+    padding: 10px 20px; border-radius: 8px; font-weight: 700; cursor: pointer;
+  }
+  #select-merge:disabled { background: var(--panel-2); color: var(--fg-dim); }
+
   /* 合併區塊：沿用歷史列的視覺語言（同樣的列高、同樣的分隔線），
      只用左側一條強調色標示它是動作區，不要做成另一種卡片。 */
   .mergebox { border-bottom: 1px solid var(--line); }
@@ -180,16 +220,26 @@
   #sum-toggle:active { background: var(--panel-2); color: var(--fg); }
   #sumwrap.folded #sum-toggle { transform: rotate(-90deg); }
   #sumwrap.folded #summaries { display: none; }
+  /* 尺寸要下在 #sumwrap 上。下在 #summaries 上的話，38% 算的是
+     #sumwrap 的寬度而不是主區的，而且一收合 #sumwrap 就塌成一條窄柱。 */
+  #sumwrap { display: flex; flex-direction: column; min-height: 0; flex: none; }
   #summaries {
-    flex: none; max-height: 38%; overflow-y: auto;
+    flex: 1 1 auto; max-height: 38vh; overflow-y: auto;
     background: var(--panel); border-top: 1px solid var(--line); padding: 6px 0;
   }
-  @media (orientation: landscape) {
-    #summaries {
-      max-height: none; width: 38%; max-width: 460px;
-      border-top: none; border-left: 1px solid var(--line);
+  @media (min-width: 720px) {
+    #sumwrap {
+      width: 38%; max-width: 460px; min-width: 280px;
+      background: var(--panel); border-left: 1px solid var(--line);
     }
+    /* 收合後只留標頭那一條，寬度跟著縮回去，逐字稿吃滿剩下的空間 */
+    #sumwrap.folded {
+      width: auto; min-width: 0; max-width: none;
+    }
+    #summaries { max-height: none; border-top: none; }
   }
+  #sumwrap.folded #sumcount { display: none; }
+  #sumwrap.folded #sumbar { padding: 8px 10px; }
   #summaries:empty::after {
     content: "按下方按鈕標記重點，摘要會出現在這裡";
     display: block; padding: 18px 16px; color: var(--fg-dim); font-size: 14px;
@@ -253,6 +303,16 @@
   #copy-view { position: fixed; inset: 0; background: var(--bg); z-index: 45;
     display: none; flex-direction: column; }
   #copy-view.show { display: flex; }
+  /* 夠寬的時候收成右側欄。整片蓋住的話就沒辦法一邊照著抄、一邊看
+     逐字稿還在跑什麼——而抄筆記的時候課還在上。窄視窗（分割螢幕）
+     維持全螢幕：硬分兩欄的話兩邊都讀不了。 */
+  @media (min-width: 720px) {
+    #copy-view.show {
+      inset: 0 0 0 auto; width: 52%; min-width: 360px;
+      border-left: 1px solid var(--line);
+      box-shadow: -10px 0 28px rgba(0, 0, 0, .45);
+    }
+  }
   #copy-body { flex: 1; overflow-y: auto; padding: 18px 20px 28px; }
   #copy-body h1 { font-size: 20px; margin: 0 0 16px; }
   #copy-body h2 {
@@ -412,6 +472,7 @@
 <header>
   <button id="home" title="回首頁">◀ 首頁</button>
   <button id="hist-top" class="hbtn" title="歷史紀錄與筆記">紀錄</button>
+  <button id="notes-open" class="hbtn" title="看剛才產生的手抄版" hidden>看筆記</button>
   <span class="dot" id="dot" title="連線狀態"></span>
   <span id="elapsed">00:00:00</span>
   <span class="meta">
@@ -508,11 +569,18 @@
   </header>
   <div id="usage"></div>
   <div id="history-list"></div>
+  <div id="select-bar">
+    <span id="select-count"></span>
+    <span id="select-why"></span>
+    <span class="spacer"></span>
+    <button id="select-cancel" class="link">取消</button>
+    <button id="select-merge">合併</button>
+  </div>
 </div>
 
 <!-- ?v= 是必要的：index.html 和 app.js 會被各自快取，版本對不上時
      畫面上看得到新按鈕、但監聽器在舊檔裡，按了完全沒反應。
      這個字串要跟 sw.js 的 VERSION 一致，selftest 會檢查。 -->
-<script src="app.js?v=v21"></script>
+<script src="app.js?v=v23"></script>
 </body>
 </html>
