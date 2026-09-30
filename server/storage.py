@@ -78,6 +78,9 @@ def init(db_path=None) -> None:
         # 合併產生的紀錄記下來源 id（JSON 陣列）。沒有這個欄位的話，
         # 合併結果跟來源同一天同一門課，會被當成「還可以再合併一次」。
         _migrate(cur, "sessions", "merged_from", "TEXT")
+        # 使用者自己下的備註。同一天同一門課錄好幾段時，光看時間分不出
+        # 哪段是哪段（「補課」「分組討論」「老師講考試範圍」）。
+        _migrate(cur, "sessions", "note", "TEXT")
         cur.close()
         _conn.commit()
 
@@ -132,6 +135,14 @@ def _migrate(cur, table, column, decl):
         cur.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, decl))
 
 
+def set_note(session_id: str, note) -> None:
+    """使用者給這堂課下的備註。空字串等於清掉。"""
+    text = (note or "").strip()
+    with _cursor() as cur:
+        cur.execute("UPDATE sessions SET note=? WHERE id=?",
+                    (text or None, session_id))
+
+
 def set_merged_from(session_id: str, source_ids) -> None:
     """記下這筆是由哪幾堂合併來的。"""
     with _cursor() as cur:
@@ -150,7 +161,7 @@ def list_sessions(limit: int = 100):
     with _cursor() as cur:
         cur.execute(
             "SELECT id, course_id, started_at, ended_at, duration_s, "
-            "merged_from FROM sessions ORDER BY started_at DESC LIMIT ?",
+            "merged_from, note FROM sessions ORDER BY started_at DESC LIMIT ?",
             (limit,),
         )
         return [dict(r) for r in cur.fetchall()]

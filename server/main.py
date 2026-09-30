@@ -126,6 +126,15 @@ async def api_session(session_id: str):
             "segments": storage.list_segments(session_id)}
 
 
+@app.post("/api/sessions/{session_id}/note")
+async def api_set_note(session_id: str, note: str = Body("", embed=True)):
+    """替這堂課下備註。同一天好幾段時，光看時間認不出是哪一段。"""
+    if storage.get_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    storage.set_note(session_id, note)
+    return {"ok": True, "note": (note or "").strip()}
+
+
 @app.delete("/api/sessions/{session_id}")
 async def api_delete_session(session_id: str):
     """刪除一堂課：逐字稿、摘要、錄音檔一起清掉。"""
