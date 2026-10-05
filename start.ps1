@@ -7,6 +7,11 @@
 param([switch]$CheckOnly)
 
 $ErrorActionPreference = "Stop"
+# tailscale 輸出 UTF-8，但 Windows PowerShell 5.1 預設用系統碼頁（繁中 CP950）
+# 解碼外部程式的輸出。帳號名稱或裝置名稱帶中文時 JSON 會被解成亂碼，
+# 多位元組序列還會吃掉後面的引號，ConvertFrom-Json 直接失敗，服務起不來。
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 $root = $PSScriptRoot
 $tailscale = "C:\Program Files\Tailscale\tailscale.exe"
 $port = 8000
@@ -23,6 +28,14 @@ function Ok($msg, $detail) {
     Write-Host "  [v] $msg" -ForegroundColor Green
     if ($detail) { Write-Host "      $detail" -ForegroundColor DarkGray }
     return $true
+}
+# 機器名稱只是拿來印手機網址的，取不到不該讓整個服務起不來
+function Get-TsDnsName {
+    try {
+        $j = & $tailscale status --json 2>$null | Out-String | ConvertFrom-Json
+        if ($j.Self.DNSName) { return $j.Self.DNSName.TrimEnd('.') }
+    } catch { }
+    return $null
 }
 
 Write-Host "`n=== 前置檢查 ===" -ForegroundColor Cyan
@@ -70,8 +83,7 @@ $tsOk = $false
 if (Test-Path $tailscale) {
     $status = & $tailscale status 2>&1
     if ($LASTEXITCODE -eq 0) {
-        $dns = (& $tailscale status --json 2>$null | ConvertFrom-Json).Self.DNSName
-        if ($dns) { $dns = $dns.TrimEnd('.') }
+        $dns = Get-TsDnsName
         $tsOk = $true
         Ok "Tailscale 已登入" $dns | Out-Null
     } else {
@@ -116,11 +128,11 @@ try {
 
     # Tailscale Serve：自動申請並續期 Let's Encrypt 憑證，不需自簽（規格 §9.1）
     & $tailscale serve --bg --https=443 "http://localhost:$port" 2>&1 | Out-Null
-    $dns = (& $tailscale status --json 2>$null | ConvertFrom-Json).Self.DNSName
-    if ($dns) { $dns = $dns.TrimEnd('.') }
+    $dns = Get-TsDnsName
 
     Write-Host "`n=== 手機上開這個網址 ===" -ForegroundColor Cyan
-    Write-Host "    https://$dns`n" -ForegroundColor White
+    if ($dns) { Write-Host "    https://$dns`n" -ForegroundColor White }
+    else { Write-Host "    （取不到機器名稱，請用 tailscale status 查）`n" -ForegroundColor Yellow }
     Write-Host "  手機要裝 Tailscale 並登入同一帳號。" -ForegroundColor DarkGray
     Write-Host "  必須走 https —— getUserMedia 只在 secure context 下可用。" -ForegroundColor DarkGray
     Write-Host "`n  Ctrl+C 停止服務`n" -ForegroundColor DarkGray
