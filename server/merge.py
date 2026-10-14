@@ -95,7 +95,12 @@ def concat_audio(rows, out_id: str, course=None):
                         "取樣率不一致（%s 是 %d Hz），無法合併"
                         % (Path(p).name, src.samplerate))
                 while True:
-                    block = src.read(1 << 16, dtype="int16")
+                    try:
+                        block = src.read(1 << 16, dtype="int16")
+                    except RuntimeError:
+                        # 中斷過的錄音檔頭沒寫完，讀到真正的檔尾會丟錯，
+                        # 但前面的音訊是完整的
+                        break
                     if not len(block):
                         break
                     out.write(block)
@@ -142,46 +147,56 @@ async def merge_sessions(ids, summarizer) -> dict:
 
     # 1. 逐字稿搬過去，時間往後平移
     storage.create_session(new_id, course.id, rows[0]["started_at"])
-    total = 0.0
-    n_seg = 0
-    fixer = term_fix.for_course(course)
-    merged_text = []
-    for r in rows:
-        off = offsets.get(r["id"], 0.0)
-        for g in storage.list_segments(r["id"]):
-            text = g["text"]
-            if fixer.enabled:
-                text, _ = fixer.fix(text)
-            storage.insert_segment(new_id, g["start_s"] + off,
-                                   g["end_s"] + off, text, g.get("avg_logprob"))
-            merged_text.append(text)
-            total = max(total, g["end_s"] + off)
-            n_seg += 1
-    if not n_seg:
+    # 先記下錄音路徑：萬一中途被砍，使用者從介面刪掉這筆半成品時，
+    # 接好的錄音檔才會跟著被清掉，不會留下沒人引用的孤兒檔
+    if audio_path:
+        storage.set_audio_path(new_id, audio_path)
+    try:
+        total = 0.0
+        n_seg = 0
+        fixer = term_fix.for_course(course)
+        merged_text = []
+        for r in rows:
+            off = offsets.get(r["id"], 0.0)
+            for g in storage.list_segments(r["id"]):
+                text = g["text"]
+                if fixer.enabled:
+                    text, _ = fixer.fix(text)
+                storage.insert_segment(new_id, g["start_s"] + off,
+                                       g["end_s"] + off, text, g.get("avg_logprob"))
+                merged_text.append(text)
+                total = max(total, g["end_s"] + off)
+                n_seg += 1
+        if not n_seg:
+            raise MergeError("這幾堂都沒有逐字稿，沒有東西可以合併")
+
+        # 2. 重新產生段落摘要。不沿用原本的段落：原本的邊界是按鈕按下去的
+        #    時間點，跨段之後那些邊界沒有意義了。
+        text = "".join(merged_text).strip()
+        spans = await summarizer.summarize_span(course, [], text, 0.0, total)
+        sections = [{"start_s": sp["start_s"], "end_s": sp["end_s"],
+                     "title": sp["title"], "bullets": sp["bullets"],
+                     "summary": sp.get("summary", ""),
+                     "groups": sp.get("groups") or [],
+                     "user_note": None} for sp in spans]
+        storage.replace_sections(new_id, sections)
+
+        # 3. 總筆記
+        row = storage.get_session(new_id)
+        notes = await summarizer.summarize_handcopy(course, sections,
+                                                    model_key="final")
+        handcopy_md = export.build_handcopy(course, row, notes)
+        final = await summarizer.summarize_final(course, sections)
+        final_md = export.build_markdown(course, row, sections, final)
+        storage.finish_session(new_id, rows[-1]["ended_at"] or rows[-1]["started_at"],
+                               total, final_md, handcopy_md, audio_path)
+        storage.set_merged_from(new_id, [r["id"] for r in rows])
+    except BaseException:
+        # 合併到一半失敗，不要留一筆「未結束」的半成品在歷史紀錄裡
         storage.delete_session(new_id)
-        raise MergeError("這幾堂都沒有逐字稿，沒有東西可以合併")
-
-    # 2. 重新產生段落摘要。不沿用原本的段落：原本的邊界是按鈕按下去的
-    #    時間點，跨段之後那些邊界沒有意義了。
-    text = "".join(merged_text).strip()
-    spans = await summarizer.summarize_span(course, [], text, 0.0, total)
-    sections = [{"start_s": sp["start_s"], "end_s": sp["end_s"],
-                 "title": sp["title"], "bullets": sp["bullets"],
-                 "summary": sp.get("summary", ""),
-                 "groups": sp.get("groups") or [],
-                 "user_note": None} for sp in spans]
-    storage.replace_sections(new_id, sections)
-
-    # 3. 總筆記
-    row = storage.get_session(new_id)
-    notes = await summarizer.summarize_handcopy(course, sections,
-                                                model_key="final")
-    handcopy_md = export.build_handcopy(course, row, notes)
-    final = await summarizer.summarize_final(course, sections)
-    final_md = export.build_markdown(course, row, sections, final)
-    storage.finish_session(new_id, rows[-1]["ended_at"] or rows[-1]["started_at"],
-                           total, final_md, handcopy_md, audio_path)
-    storage.set_merged_from(new_id, [r["id"] for r in rows])
+        if audio_path:
+            Path(audio_path).unlink(missing_ok=True)
+        raise
 
     return {"id": new_id, "course_id": course.id, "merged_from": [r["id"] for r in rows],
             "segments": n_seg, "chars": len(text), "sections": len(sections),
