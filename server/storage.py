@@ -135,6 +135,12 @@ def _migrate(cur, table, column, decl):
         cur.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, decl))
 
 
+def set_audio_path(session_id: str, path) -> None:
+    with _cursor() as cur:
+        cur.execute("UPDATE sessions SET audio_path=? WHERE id=?",
+                    (path, session_id))
+
+
 def set_note(session_id: str, note) -> None:
     """使用者給這堂課下的備註。空字串等於清掉。"""
     text = (note or "").strip()

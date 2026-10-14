@@ -11,8 +11,8 @@ from fastapi import Body, FastAPI, HTTPException, Query, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import (asr, audio_pipeline, config, courses, export, storage,
-               term_fix, ws_session)
+from . import (asr, audio_pipeline, audio_store, config, courses, export,
+               storage, term_fix, ws_session)
 from .llm_manager import LLMManager, LLMUnavailable
 from .summarizer import Summarizer
 
@@ -193,6 +193,13 @@ def _now_iso() -> str:
 
 async def _finish_from_db(session_id: str, s: dict) -> dict:
     """伺服器重啟後只剩資料庫時，從逐字稿把筆記補出來。"""
+    # 中斷的課錄音檔頭是沒寫完的，不修的話播放器拖不動、合併會直接失敗
+    audio = s.get("audio_path")
+    if audio:
+        try:
+            await asyncio.to_thread(audio_store.repair_flac, audio)
+        except Exception as e:
+            log.warning("錄音檔頭修復失敗（筆記照樣產生）：%s", e)
     segs = storage.list_segments(session_id)
     if not segs:
         storage.finish_session(session_id, _now_iso(), 0.0, None, None,

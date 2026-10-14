@@ -578,6 +578,12 @@ async def handle_connection(ws, course_id: str, engine, summarizer, llm,
                 _sessions[session.id] = session
                 await asyncio.to_thread(storage.create_session, session.id,
                                         course.id, session.started_at)
+                # 開始就把錄音路徑寫進去，不要等正常結束才寫。伺服器中途掛掉
+                # （關機、Windows Update 重開機）的話，錄音檔明明有存，資料庫
+                # 卻沒有連結——事後補收尾接不回去，刪紀錄時檔案也不會被清掉。
+                if session.recorder is not None:
+                    await asyncio.to_thread(storage.set_audio_path, session.id,
+                                            str(session.recorder.path))
                 session.pipeline.start()
                 await session.send({"type": "session_started",
                                     "session_id": session.id,

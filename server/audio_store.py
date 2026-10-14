@@ -64,6 +64,50 @@ def build_filename(course, started_at, session_id, directory=None,
     return path
 
 
+def repair_flac(path) -> float:
+    """把沒正常關閉的 FLAC 重寫一份完整的，回傳實際秒數；檔案正常就不動。
+
+    伺服器在錄音中被砍掉時，FLAC 的檔頭來不及寫入總長度，讀出來會是
+    九兆分鐘之類的垃圾值，讀到檔尾還會丟 psf_fseek 錯誤——播放器拖不動、
+    合併時直接失敗。音訊本身是完整的，逐塊解到出錯為止再寫一份新的即可。
+    """
+    import soundfile as sf
+    p = Path(path)
+    if not p.exists():
+        return 0.0
+    with sf.SoundFile(str(p)) as f:
+        claimed = f.frames
+        sr = f.samplerate
+    # 宣稱的長度合理（小於一天）就當它是正常檔
+    if 0 < claimed < sr * 86400:
+        return claimed / float(sr)
+
+    tmp = p.with_suffix(".repair.flac")
+    n = 0
+    try:
+        with sf.SoundFile(str(p)) as src, sf.SoundFile(
+                str(tmp), mode="w", samplerate=src.samplerate,
+                channels=src.channels, format="FLAC", subtype="PCM_16") as dst:
+            while True:
+                try:
+                    block = src.read(1 << 16, dtype="int16")
+                except RuntimeError:
+                    break       # 解到沒寫完的檔尾了
+                if not len(block):
+                    break
+                dst.write(block)
+                n += len(block)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+    if n == 0:
+        tmp.unlink(missing_ok=True)
+        return 0.0
+    tmp.replace(p)
+    log.info("已修復錄音檔頭 %s（%.1f 分鐘）", p.name, n / sr / 60)
+    return n / float(sr)
+
+
 class AudioRecorder:
     """單一 session 的音訊寫入器。write() 可從任意執行緒呼叫。"""
 
