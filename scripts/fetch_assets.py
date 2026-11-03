@@ -1,4 +1,4 @@
-"""下載外部資產：ASR 模型、llama.cpp 執行檔、摘要模型 GGUF。
+"""下載外部資產：ASR 模型、llama.cpp 執行檔、摘要模型 GGUF、講者聲紋模型。
 
 規格書沒有這支（§3.3 只給了轉換指令），但把下載步驟腳本化才能重跑、續傳，
 也讓 verify_m0 的修復建議有一個明確的執行入口。
@@ -135,15 +135,31 @@ def fetch_gguf(only=None) -> bool:
     return ok
 
 
+def fetch_diarize() -> bool:
+    from server.diarize import EMBEDDING_MODEL, EMBEDDING_URL
+    header("講者聲紋模型：%s" % EMBEDDING_MODEL.name)
+    if EMBEDDING_MODEL.exists():
+        print("  已存在，略過")
+        return True
+    EMBEDDING_MODEL.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        _download(EMBEDDING_URL, EMBEDDING_MODEL)
+    except Exception as e:
+        print("  FAIL：%s" % e)
+        return False
+    print("  OK  %.0f MB" % _mb(EMBEDDING_MODEL))
+    return True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("what", nargs="*", default=None,
-                    choices=["asr", "llama", "gguf"],
+                    choices=["asr", "llama", "gguf", "diarize"],
                     help="不指定就全部抓")
     ap.add_argument("--only", default="",
                     help="gguf 專用，逗號分隔：4b,8b,1.7b,4b0")
     args = ap.parse_args()
-    what = args.what or ["asr", "llama", "gguf"]
+    what = args.what or ["asr", "llama", "gguf", "diarize"]
     only = {s.strip() for s in args.only.split(",") if s.strip()} or None
 
     results = {}
@@ -153,6 +169,8 @@ def main() -> int:
         results["llama"] = fetch_llama()
     if "gguf" in what:
         results["gguf"] = fetch_gguf(only)
+    if "diarize" in what:
+        results["diarize"] = fetch_diarize()
 
     header("下載結果")
     for k, v in results.items():

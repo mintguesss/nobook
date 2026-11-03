@@ -407,6 +407,26 @@ handcopy:
 
 ---
 
+## 會議錄音
+
+已經錄好的會議檔（m4a、mp3、wav 等）可以轉成標好講者的逐字稿：
+
+```bash
+python scripts/fetch_assets.py diarize        # 第一次要下載聲紋模型
+python scripts/transcribe_meeting.py <錄音檔或資料夾> --terms 術語.yaml --speakers 3
+```
+
+輸出在錄音旁邊的 `逐字稿/`，不會寫進資料庫。`--terms` 的格式寫在腳本開頭，
+放這批會議會講到的詞和固定錯字對照；會議內容不是公開資料，不要寫進 `courses/`。
+
+講者只分得出「講者 1、講者 2」，不知道誰是誰，而且只有這支腳本會標，
+上課時的即時流程不會。**知道人數就給 `--speakers`**：拿不同課堂錄音剪成
+已知講者的音檔實測，自動判斷時 3～5 人的正確率約 85～99%，但人數可能多算
+一兩個（發言量懸殊時只有約 70%）；指定 5 人短發言可從 85% 提高到 91%。
+這些音檔來自不同教室，同一個麥克風錄同一間會議室會更難分，數字只能當上限看。
+
+---
+
 ## 專案結構
 
 ```
@@ -424,6 +444,7 @@ nobook/
 │   ├── docx_export.py       Markdown → Word 原生樣式
 │   ├── merge.py             同一天多段錄音合併、重新產生總筆記
 │   ├── term_fix.py          用術語表做近似音修正（pypinyin）
+│   ├── diarize.py           講者辨識（會議錄音用，跑在 CPU）
 │   ├── verify_notes.py      接地檢查：標出逐字稿找不到依據的內容
 │   ├── audio_store.py       整堂錄音存成 FLAC（選用）
 │   ├── courses.py           課程設定檔載入

@@ -862,6 +862,10 @@ class _Traditional:
         "許可權": "權限",
         # 「信息安全→資訊保安」是港式，台灣講資訊安全
         "資訊保安": "資訊安全",
+        # 用語層把正確的詞換掉：卸載→解除安裝（負載卸載變認知解除安裝）、
+        # 算法→演算法（連帶演算法→演演算法）、腳本→指令碼、擴展→擴充套件。
+        "解除安裝": "卸載", "演演算法": "演算法", "指令碼": "腳本",
+        "擴充套件": "擴展",
     }
 
     def __init__(self):
@@ -873,7 +877,8 @@ class _Traditional:
             log.warning("OpenCC 不可用（%s），摘要可能出現簡體字", e)
 
     def _fix_variants(self, t: str) -> str:
-        if any(k in t for k in ("閤", "匯", "程式", "許可權", "保安")):
+        if any(k in t for k in ("閤", "匯", "程式", "許可權", "保安", "解除安裝",
+                                "演演算法", "指令碼", "擴充套件")):
             for bad, good in self.VARIANTS.items():
                 t = t.replace(bad, good)
         return t

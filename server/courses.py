@@ -32,6 +32,8 @@ class Course:
     # 一般的主題式手抄版。
     handcopy_sections: list = field(default_factory=list)
     handcopy_target_chars: int = 0
+    # 人工確認過的固定錯字對照（聽錯的寫法 → 正確寫法），見 term_fix.py
+    corrections: dict = field(default_factory=dict)
 
     @property
     def glossary_line(self) -> str:
@@ -125,6 +127,7 @@ def load_course(course_id: str, courses_dir=None) -> Course:
         glossary=[str(g) for g in (raw.get("glossary") or [])],
         handcopy_sections=_parse_handcopy_sections(hc.get("sections"), course_id),
         handcopy_target_chars=int(hc.get("target_chars") or 0),
+        corrections={str(k): str(v) for k, v in (raw.get("corrections") or {}).items()},
     )
 
 

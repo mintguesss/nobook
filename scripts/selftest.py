@@ -666,6 +666,58 @@ def test_postprocess(gate):
     gate.check(not bad, "幻覺尾巴與過短輸出被丟棄", "未被過濾：%s" % bad if bad else "全數過濾")
     gate.check(clean_text("  多  餘   空白  ", None) == "多 餘 空白", "空白正規化")
 
+    from server.asr import OpenCCConverter, is_foreign_guess
+    cc = OpenCCConverter()
+    words = ["負載卸載", "演算法", "腳本", "權限", "這份文件"]
+    gate.check([cc(w) for w in words] == words, "繁簡轉換不改動正確的繁體詞")
+    gate.check(cc("这个模型") == "這個模型", "簡體仍會轉成繁體")
+    gate.check(clean_text("都要做一點多一點多一點多一點多", None) == "都要做一點多",
+               "卡住的重複收成一次")
+    gate.check(not clean_text("1 個 1 個 1 個 1 個 1 個 1", None), "整行都是重複就丟棄")
+    keep = ["對對對然後", "我們要找 8.8.8.8.8.9", "一直換一直換一直換"]
+    gate.check([clean_text(t, None) for t in keep] == keep,
+               "真的會講的重複與 IP 位址不受影響")
+    gate.check(is_foreign_guess("The team came through.", -0.9), "低信心純英文視為幻覺")
+    gate.check(not is_foreign_guess("detail use case", -0.3), "高信心英文保留")
+    gate.check(not is_foreign_guess("這個 loss 很高", -0.9), "含中文的句子不算外語幻覺")
+
+
+def test_term_fix(gate):
+    from server.term_fix import TermFixer
+    fixer = TermFixer([], corrections={"深層式": "生成式"})
+    text, fixes = fixer.fix("導入了深層式 AI")
+    gate.check(fixer.enabled and text == "導入了生成式 AI" and len(fixes) == 1,
+               "固定錯字對照會套用並留下紀錄", text)
+
+
+def test_diarize(gate):
+    from server.diarize import (_merge_similar_clusters, _smooth, _turns, _windows,
+                                assign_speaker, nearest_speaker, renumber,
+                                split_words_by_speaker)
+    sr = config.SAMPLE_RATE
+    wins = _windows([(0, sr), (5 * sr, 8 * sr)])
+    gate.check(wins[0] == (0, sr) and wins[-1][1] == 8 * sr, "聲紋窗涵蓋到語音區間結尾")
+    spans = _turns(wins, np.zeros(len(wins), dtype=int))
+    gate.check(spans[0][:2] == (0.0, 1.0) and spans[-1][:2] == (5.0, 8.0),
+               "發言區間含短句與頭尾", str(spans))
+    gate.check(nearest_speaker(2.2, 2.4, [(0.0, 2.0, 1)]) == 1, "短句跟著緊鄰的發言")
+    gate.check(nearest_speaker(5.0, 5.5, [(0.0, 2.0, 1)]) is None, "離太遠就不亂標")
+    gate.check(renumber([(5, 6, 9), (1, 2, 3), (7, 8, 3)]) ==
+               [(1, 2, 1), (5, 6, 2), (7, 8, 1)], "講者照開口順序編號")
+    turns = [(0.0, 2.0, 1), (2.0, 5.0, 2)]
+    gate.check(assign_speaker(1.0, 4.0, turns) == 2, "一段話歸給講最久的人")
+    gate.check(assign_speaker(6.0, 7.0, turns) is None, "沒人講話的時段不亂標")
+    parts = split_words_by_speaker(
+        [(0.5, 1.0, "你好"), (2.5, 3.0, "我"), (3.0, 3.5, "很好"), (5.5, 6.0, "喔")], turns)
+    gate.check([(p[2], p[3]) for p in parts] == [("你好", 1), ("我很好喔", 2)],
+               "一段話裡換人時依講者切開，對不到的字跟著前一個人")
+    vec = np.array([[1, 0], [0.99, 0.14], [0, 1]], dtype=np.float32)
+    merged = _merge_similar_clusters(vec, np.array([0, 1, 2]))
+    gate.check(merged[0] == merged[1] != merged[2], "聲音相近的群併成同一人")
+    labels = np.array([1, 1, 2, 1, 1])
+    windows = [(i * 12000, i * 12000 + 24000) for i in range(5)]
+    gate.check(_smooth(labels, windows).tolist() == [1] * 5, "只跳一個窗的講者視為誤判")
+
 
 def test_oom_detect(gate):
     gate.check(is_oom(RuntimeError("CUDA failed with error out of memory")),
@@ -739,6 +791,8 @@ def main() -> int:
     test_courses(gate)
     print("\n[ASR 後處理 §4.4]")
     test_postprocess(gate)
+    test_term_fix(gate)
+    test_diarize(gate)
     print("\n[OOM 偵測 §7.4]")
     test_oom_detect(gate)
     print("\n[音訊 chunk 協定 §4.1]")

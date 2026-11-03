@@ -93,15 +93,19 @@ class TermFixer:
     # 變動→電動(0.88)、原物→原木(0.88)，又不會誤傷無關的詞。
     THRESHOLD = 0.85
 
-    def __init__(self, glossary, threshold: float = None):
+    def __init__(self, glossary, threshold: float = None, corrections=None):
         self.threshold = self.THRESHOLD if threshold is None else threshold
+        # 人工確認過的固定對照（錯字 → 正確寫法）。讀音差太多、拼音比對抓不到的
+        # 錯誤放這裡，例如前後鼻音加聲母都不同的「深層式 → 生成式」。
+        self.corrections = dict(corrections or {})
         # 只處理中文術語；英文術語靠 initial_prompt 與 LLM 處理
         self.terms = [g for g in (glossary or [])
                       if g and not g.isascii() and 2 <= len(g) <= 6]
         self._by_len = {}
         for t in self.terms:
             self._by_len.setdefault(len(t), []).append(t)
-        self.enabled = bool(self.terms) and _pinyin_of("測") is not None
+        self.enabled = bool(self.corrections) or (
+            bool(self.terms) and _pinyin_of("測") is not None)
 
     # 出現這麼多次以上的字串視為「老師真的在講這個詞」，不修正。
     # 這條規則是實測逼出來的：供應鏈那堂課「價值」出現 12 次，
@@ -116,6 +120,10 @@ class TermFixer:
             return text, []
         out = text
         corrections = []
+        for wrong, right in self.corrections.items():
+            if wrong in out:
+                corrections.append((wrong, right, 1.0))
+                out = out.replace(wrong, right)
         term_set = set(self.terms)
         for n, terms in self._by_len.items():
             if len(out) < n:
@@ -165,7 +173,8 @@ _CACHE = {}
 
 def for_course(course):
     """每門課一個修正器，快取起來避免重複建。"""
-    key = (course.id, tuple(course.glossary))
+    key = (course.id, tuple(course.glossary),
+           tuple(sorted(course.corrections.items())))
     if key not in _CACHE:
-        _CACHE[key] = TermFixer(course.glossary)
+        _CACHE[key] = TermFixer(course.glossary, corrections=course.corrections)
     return _CACHE[key]

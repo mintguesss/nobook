@@ -1,0 +1,10 @@
+# 會議錄音：沒有專屬詞庫的預設設定。
+#
+# 每場會議的術語不要寫進這個檔（repo 是公開的）。用
+# scripts/transcribe_meeting.py 的 --terms 另外指定，檔案放在錄音旁邊。
+id: meeting
+name: 會議記錄
+instructor: ""
+asr_prompt: |
+  以下是中文會議的錄音內容，由多人討論。
+glossary: []
