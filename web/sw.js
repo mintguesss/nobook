@@ -6,11 +6,11 @@
  * 頁面會一直跑舊的 app.js，而且外觀上完全看不出來。
  * 快取的角色只是「伺服器連不上時還能開啟頁面」的備援。
  */
-const VERSION = 'v23';
+const VERSION = 'v24';
 const CACHE = 'nobook-' + VERSION;
 const ASSETS = [
   './', 'index.html', 'app.js', 'recorder-worklet.js',
-  'manifest.json', 'icon.svg',
+  'manifest.json', 'icon.svg', 'icon-180.png', 'icon-512.png',
 ];
 
 self.addEventListener('install', (e) => {

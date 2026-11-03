@@ -81,6 +81,10 @@ def init(db_path=None) -> None:
         # 使用者自己下的備註。同一天同一門課錄好幾段時，光看時間分不出
         # 哪段是哪段（「補課」「分組討論」「老師講考試範圍」）。
         _migrate(cur, "sessions", "note", "TEXT")
+        # 上傳檔的轉錄狀態與講者（會議錄音才有）
+        _migrate(cur, "sessions", "job", "TEXT")
+        _migrate(cur, "sessions", "speaker_names", "TEXT")
+        _migrate(cur, "segments", "speaker", "INTEGER")
         cur.close()
         _conn.commit()
 
@@ -167,7 +171,7 @@ def list_sessions(limit: int = 100):
     with _cursor() as cur:
         cur.execute(
             "SELECT id, course_id, started_at, ended_at, duration_s, "
-            "merged_from, note FROM sessions ORDER BY started_at DESC LIMIT ?",
+            "merged_from, note, job FROM sessions ORDER BY started_at DESC LIMIT ?",
             (limit,),
         )
         return [dict(r) for r in cur.fetchall()]
@@ -210,7 +214,7 @@ def insert_segment(session_id: str, start_s: float, end_s: float, text: str,
 def list_segments(session_id: str):
     with _cursor() as cur:
         cur.execute(
-            "SELECT id, start_s, end_s, text, avg_logprob FROM segments "
+            "SELECT id, start_s, end_s, text, avg_logprob, speaker FROM segments "
             "WHERE session_id=? ORDER BY start_s",
             (session_id,),
         )
@@ -296,6 +300,37 @@ def get_alignment(session_id: str):
         return json.loads(s["align_json"])
     except (json.JSONDecodeError, TypeError):
         return None
+
+
+def replace_segments(session_id: str, rows) -> None:
+    """整批換掉逐字稿。rows 的欄位見 meeting.py。"""
+    with _cursor() as cur:
+        cur.execute("DELETE FROM segments WHERE session_id=?", (session_id,))
+        cur.executemany(
+            "INSERT INTO segments (session_id, start_s, end_s, text, avg_logprob, speaker) "
+            "VALUES (?,?,?,?,?,?)",
+            [(session_id, r["start"], r["end"], r["text"], r["avg_logprob"],
+              r.get("speaker")) for r in rows],
+        )
+
+
+def set_job(session_id: str, job: dict) -> None:
+    with _cursor() as cur:
+        cur.execute("UPDATE sessions SET job=? WHERE id=?",
+                    (json.dumps(job, ensure_ascii=False), session_id))
+
+
+def list_unfinished_jobs():
+    with _cursor() as cur:
+        cur.execute("SELECT id, job FROM sessions WHERE job IS NOT NULL "
+                    "ORDER BY started_at")
+        return [dict(r) for r in cur.fetchall()]
+
+
+def set_speaker_names(session_id: str, names: dict) -> None:
+    with _cursor() as cur:
+        cur.execute("UPDATE sessions SET speaker_names=? WHERE id=?",
+                    (json.dumps(names, ensure_ascii=False), session_id))
 
 
 def update_segment_text(seg_id: int, text: str) -> None:

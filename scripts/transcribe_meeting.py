@@ -25,15 +25,11 @@ import yaml
 
 from _common import header
 
-from server import config, courses, diarize, term_fix
-from server.asr import ASREngine, clean_text
-from server.audio_pipeline import VadSegmenter
+from server import config, courses, diarize, meeting, term_fix
+from server.asr import ASREngine
 from server.vad import make_vad
 
 AUDIO_EXTS = {".m4a", ".mp3", ".wav", ".flac", ".aac", ".ogg", ".opus", ".mp4", ".webm"}
-# 同一人的相鄰片段併成一行，逐字稿才不會碎成一句一行
-MERGE_GAP_S = 3.0
-MERGE_MAX_CHARS = 300
 
 
 def find_audio(path: Path):
@@ -47,55 +43,15 @@ def load_terms(course, path):
     if not path:
         return course
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    course.asr_prompt = courses._truncate_prompt(
-        (course.asr_prompt.strip() + " " + str(raw.get("asr_prompt") or "")).strip(),
-        course.id)
-    course.glossary = [str(g) for g in (raw.get("glossary") or [])]
-    course.corrections = {str(k): str(v)
-                          for k, v in (raw.get("corrections") or {}).items()}
-    return course
+    return meeting.with_terms(
+        course, [str(g) for g in (raw.get("glossary") or [])],
+        {str(k): str(v) for k, v in (raw.get("corrections") or {}).items()},
+        str(raw.get("asr_prompt") or ""))
 
 
 def fmt_ts(seconds: float) -> str:
     s = int(seconds)
     return "%02d:%02d:%02d" % (s // 3600, s % 3600 // 60, s % 60)
-
-
-def transcribe_segment(engine, fixer, seg, prompt, turns, log):
-    """一個 VAD 段落 → 依講者切開的列。"""
-    rows = []
-    for part in engine.transcribe(seg.audio, prompt, word_timestamps=True):
-        words = [(seg.start_s + a, seg.start_s + b, w) for a, b, w in part["words"]]
-        pieces = (diarize.split_words_by_speaker(words, turns) if turns and words
-                  else [(seg.start_s + part["start"], seg.start_s + part["end"],
-                         part["text"], None)])
-        for start, end, text, speaker in pieces:
-            text = clean_text(text, engine._cc)
-            if not text:
-                continue
-            if fixer.enabled:
-                text, fixes = fixer.fix(text)
-                log.extend(fixes)
-            rows.append({"start": start, "end": end, "speaker": speaker,
-                         "text": text, "avg_logprob": part["avg_logprob"]})
-    return rows
-
-
-def merge_rows(rows):
-    out = []
-    for r in rows:
-        prev = out[-1] if out else None
-        if (prev and prev["speaker"] == r["speaker"]
-                and r["start"] - prev["end"] <= MERGE_GAP_S
-                and len(prev["text"]) + len(r["text"]) <= MERGE_MAX_CHARS):
-            chars = len(prev["text"]), len(r["text"])
-            prev["avg_logprob"] = ((prev["avg_logprob"] * chars[0]
-                                    + r["avg_logprob"] * chars[1]) / sum(chars))
-            prev["text"] += r["text"]
-            prev["end"] = r["end"]
-        else:
-            out.append(dict(r))
-    return out
 
 
 def write_outputs(rows, txt: Path, jsonl: Path):
@@ -127,18 +83,13 @@ def process(path, out_dir, engine, course, vad, args):
         print("    講者 %d 人（%.0fs）" % (len({t[2] for t in turns}), time.time() - t0),
               flush=True)
 
-    segmenter = VadSegmenter(vad)
-    segmenter.reset()
-    segments = []
-    for i in range(0, len(audio), config.SAMPLE_RATE):
-        segments += segmenter.feed(audio[i:i + config.SAMPLE_RATE])
-    segments += segmenter.flush()
-
+    segments = meeting.split_segments(audio, vad)
     fixer = term_fix.TermFixer(course.glossary, corrections=course.corrections)
     fixes, rows = [], []
     for seg in segments:
-        rows += transcribe_segment(engine, fixer, seg, course.asr_prompt, turns, fixes)
-    rows = merge_rows(rows)
+        rows += meeting.transcribe_segment(engine, fixer, seg, course.asr_prompt,
+                                           turns, fixes)
+    rows = meeting.merge_rows(rows)
     write_outputs(rows, txt, jsonl)
     print("    %d 行、%d 字、修正術語 %d 處，共 %.0fs"
           % (len(rows), sum(len(r["text"]) for r in rows), len(fixes), time.time() - t0),

@@ -30,6 +30,7 @@ const el = {
   sumBar: $('sumbar'), sumCount: $('sumcount'), sumToggle: $('sum-toggle'),
   copyCount: $('copy-count'),
   detail: $('detail'), detailBody: $('detail-body'), detailTitle: $('detail-title'),
+  upload: $('upload'),
 };
 
 const state = {
@@ -45,7 +46,8 @@ const state = {
   // 歷史清單的多選（長按進入）。合併的入口從清單頂端的區塊改到這裡——
   // 放在頂端的話，要合併哪幾段是系統幫你決定的，使用者沒得挑。
   selecting: false, selected: new Set(), rowsById: new Map(),
-  sections: new Map(), batches: new Map(), markBusy: false, finalMd: '',
+  sections: new Map(), batches: new Map(), markBusy: false,
+  courseNames: new Map(), detailId: null, detailTab: null, conn: 'bad',
 };
 
 // ── 小工具 ────────────────────────────────────────────────────────────
@@ -66,20 +68,78 @@ function toast(msg, ms = 3200) {
 }
 
 function setLight(kind) {
-  el.dot.className = 'dot' + (kind === 'ok' ? ' ok' : kind === 'warn' ? ' warn' : '');
+  state.conn = kind;
+  el.dot.className = 'dot' + (kind === 'ok' && !state.paused ? ' ok' : kind === 'warn' ? ' warn' : '');
+  showLiveStatus();
+}
+
+function showLiveStatus(extra) {
+  const base = state.conn === 'warn' ? '重新連線中，錄音沒有中斷'
+    : state.conn !== 'ok' ? '尚未連線'
+      : state.paused ? '已暫停' : '錄音中';
+  el.health.textContent = extra || base;
+}
+
+// ── 對話框 ────────────────────────────────────────────────────────────
+// 取代 confirm/alert：系統對話框在 iPhone 主畫面版上標題是網址，按鈕也只有
+// 「確定／取消」，看不出按下去會發生什麼事。回傳 false 代表取消。
+function ask({ title, message = '', ok = '確定', cancel = '取消', danger = false,
+               input = null, select = null }) {
+  const dlg = $('dlg');
+  dlg.innerHTML = '<h3></h3><p></p><div class="field" hidden></div><div class="btns"></div>';
+  dlg.querySelector('h3').textContent = title;
+  const p = dlg.querySelector('p');
+  p.textContent = message;
+  p.hidden = !message;
+  const field = dlg.querySelector('.field');
+  let ctrl = null;
+  if (input) {
+    ctrl = document.createElement('input');
+    ctrl.type = 'text';
+    ctrl.value = input.value || '';
+    ctrl.placeholder = input.placeholder || '';
+    ctrl.maxLength = input.maxLength || 40;
+  } else if (select) {
+    ctrl = document.createElement('select');
+    for (const [v, label] of select.options) ctrl.add(new Option(label, v));
+    ctrl.value = String(select.value);
+  }
+  if (ctrl) { field.hidden = false; field.appendChild(ctrl); }
+  const btns = dlg.querySelector('.btns');
+  return new Promise((resolve) => {
+    const done = (v) => { dlg.close(); resolve(v); };
+    if (cancel) {
+      const c = document.createElement('button');
+      c.className = 'btn';
+      c.textContent = cancel;
+      c.addEventListener('click', () => done(false));
+      btns.appendChild(c);
+    }
+    const o = document.createElement('button');
+    o.className = 'btn ' + (danger ? 'danger' : 'primary');
+    o.textContent = ok;
+    const accept = () => done(ctrl ? ctrl.value : true);
+    o.addEventListener('click', accept);
+    if (ctrl && input) {
+      ctrl.addEventListener('keydown', (e) => { if (e.key === 'Enter') accept(); });
+    }
+    btns.appendChild(o);
+    dlg.oncancel = (e) => { e.preventDefault(); done(false); };
+    dlg.showModal();
+  });
 }
 
 // ── wake lock（規格 §8.2）─────────────────────────────────────────────
-async function acquireWakeLock() {
+async function acquireWakeLock(quiet) {
   if (!('wakeLock' in navigator)) {
-    toast('此瀏覽器不支援 wake lock，請手動把螢幕逾時關掉');
+    if (!quiet) toast('這個瀏覽器沒辦法保持螢幕開著，請手動把自動鎖定關掉');
     return;
   }
   try {
     state.wakeLock = await navigator.wakeLock.request('screen');
     state.wakeLock.addEventListener('release', () => { state.wakeLock = null; });
   } catch (e) {
-    toast('無法保持螢幕喚醒：' + e.message);
+    if (!quiet) toast('沒辦法保持螢幕開著，請手動把自動鎖定關掉');
   }
 }
 document.addEventListener('visibilitychange', () => {
@@ -91,7 +151,7 @@ document.addEventListener('visibilitychange', () => {
     return;
   }
   // 切走再切回 wake lock 會失效，必須重新申請
-  if (state.running && !state.wakeLock) acquireWakeLock();
+  if ((state.running || up.running) && !state.wakeLock) acquireWakeLock(true);
   if (state.hiddenAt) {
     const gap = (Date.now() - state.hiddenAt) / 1000;
     state.hiddenAt = 0;
@@ -127,6 +187,13 @@ async function startAudio() {
     },
   });
   state.ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SR });
+  // iOS 接電話或被別的 App 搶走音訊後，AudioContext 會停在 interrupted，不會自己回來
+  if (state.ctx.state === 'suspended') await state.ctx.resume();
+  state.ctx.addEventListener('statechange', () => {
+    if (state.ctx && state.ctx.state !== 'running' && state.ctx.state !== 'closed') {
+      state.ctx.resume().catch(() => {});
+    }
+  });
   await state.ctx.audioWorklet.addModule('recorder-worklet.js');
   const src = state.ctx.createMediaStreamSource(state.stream);
   state.node = new AudioWorkletNode(state.ctx, 'recorder');
@@ -283,7 +350,7 @@ function handleEvent(msg) {
       showHandcopy(msg.markdown, msg.sections, msg.check);
       break;
     case 'final_summary_pending':
-      toast('正在切換到總結模型並生成完整筆記…', 20000);
+      toast('正在產生完整筆記…', 20000);
       break;
     case 'final_summary':
       clearEnding();
@@ -292,16 +359,17 @@ function handleEvent(msg) {
       // 留在錄完的畫面上沒有任何用處，還會讓人以為要等什麼。
       // 手抄版正開著在抄的話就別打斷。
       if (el.copyView.classList.contains('show')) {
-        toast('課後整理完成，已存入歷史筆記', 6000);
+        toast('筆記整理好了，已存進紀錄', 6000);
       } else {
         goHome();
-        toast('課後整理完成，已存入歷史筆記', 6000);
+        toast('筆記整理好了，已存進紀錄', 6000);
       }
       break;
     case 'stats':
-      el.health.textContent =
+      el.health.title =
         `RTF ${msg.rtf.toFixed(2)} · 佇列 ${msg.queue_depth} · VRAM ${Math.round(msg.vram_used_mb)}MB`
         + (msg.summary_degraded ? ' · 摘要降級' : '');
+      showLiveStatus(msg.queue_depth > 8 ? '文字慢了一點，稍後會補上' : '');
       break;
     case 'error':
       toast(msg.message);
@@ -486,7 +554,7 @@ function jumpTo(startS) {
 function setMarkBusy(busy) {
   state.markBusy = busy;
   el.mark.disabled = busy;
-  el.mark.textContent = busy ? '整 理 中 …' : '即 時 整 理';
+  el.mark.textContent = busy ? '整理中…' : '整理目前內容';
 }
 
 function doMark() {
@@ -528,15 +596,16 @@ el.pause.addEventListener('click', () => {
   state.paused = !state.paused;
   if (state.node) state.node.port.postMessage({ type: 'mute', value: state.paused });
   send({ type: state.paused ? 'pause' : 'resume' });
-  el.pause.textContent = state.paused ? '繼續錄音' : '暫停';
+  el.pause.textContent = state.paused ? '繼續' : '暫停';
+  setLight(state.conn);
   if (state.paused) state.elapsedBase += (Date.now() - state.startedAt) / 1000;
   else state.startedAt = Date.now();
   toast(state.paused ? '已暫停錄音' : '已繼續錄音');
 });
 
-el.end.addEventListener('click', () => {
+el.end.addEventListener('click', async () => {
   if (!state.running) return;
-  if (!confirm('結束課程並生成完整筆記？')) return;
+  if (!await ask({ title: '結束錄音？', message: '結束後會自動整理筆記。', ok: '結束錄音' })) return;
   state.ended = true;
   send({ type: 'end' });
   stopAudio();
@@ -550,30 +619,14 @@ el.end.addEventListener('click', () => {
 // 結束後的等待畫面。整理在伺服器上跑，關掉頁面也會跑完並存進資料庫——
 // 這件事一定要講，否則使用者會不敢離開，乾等一段不知道多久的時間。
 function showEnding() {
-  const t0 = Date.now();
   el.copyView.classList.remove('show');
   el.finalTitle.textContent = '整理中';
-  el.finalMd.textContent = '';
+  el.finalMd.innerHTML = '<span class="spin"></span><h2>正在整理筆記</h2>'
+    + '<p class="hint">通常不到一分鐘。可以直接離開，整理好會存進紀錄。</p>';
   el.final.classList.add('show');
-  const box = el.finalMd;
-  const tick = setInterval(() => {
-    const s = Math.round((Date.now() - t0) / 1000);
-    box.textContent = [
-      `正在整理這堂課的筆記…（已經過 ${s} 秒）`,
-      '',
-      '步驟：切換到較大的模型（約 5 秒）→ 產生手抄版 → 產生完整版',
-      '通常 20～30 秒完成。',
-      '',
-      '★ 可以直接關掉這個畫面或切到別的 App。',
-      '　 整理是在筆電上跑的，關掉頁面也會跑完，',
-      '　 結果會存進資料庫，之後從「歷史筆記」就看得到。',
-    ].join('\n');
-  }, 500);
-  state.endingTimer = tick;
 }
 
 function clearEnding() {
-  if (state.endingTimer) { clearInterval(state.endingTimer); state.endingTimer = null; }
 }
 
 // ── 計時 ──────────────────────────────────────────────────────────────
@@ -583,21 +636,16 @@ setInterval(() => {
   el.elapsed.textContent = fmt(secs);
 }, 500);
 
-// ── 期末筆記 ──────────────────────────────────────────────────────────
-function showFinal(md, title, sessionId) {
-  state.finalMd = md;
-  state.viewingSession = sessionId || state.sessionId;
-  el.finalTitle.textContent = title || '完整筆記';
-  el.finalMd.textContent = md;
-  el.final.classList.add('show');
-}
-
 // ── 回首頁 ────────────────────────────────────────────────────────────
 // 課程結束後原本卡在結束畫面沒路可走。這裡把狀態整個歸零，
 // 回到開始畫面就能再開一堂新的。
-function goHome() {
+async function goHome() {
   if (state.running && !state.ended) {
-    if (!confirm('錄音還在進行中，確定要離開嗎？\n離開後這堂課不會有課後整理。')) return;
+    if (!await ask({
+      title: '結束錄音並離開？',
+      message: '還在錄音。已錄的內容會保留，並自動整理筆記。',
+      ok: '結束並離開', cancel: '繼續錄音', danger: true,
+    })) return;
     try { send({ type: 'end' }); } catch (e) { /* ignore */ }
   }
   stopAudio();
@@ -622,7 +670,8 @@ function goHome() {
   el.transcript.innerHTML = '';
   el.summaries.innerHTML = '';
   el.elapsed.textContent = '00:00:00';
-  el.health.textContent = 'RTF — · 佇列 — · VRAM —';
+  el.health.textContent = '準備中…';
+  el.health.title = '';
   el.course.textContent = '—';
   el.note.value = '';
   el.note.classList.remove('show');
@@ -632,12 +681,14 @@ function goHome() {
   el.mark.disabled = false;
   el.pause.disabled = false;
   el.pause.textContent = '暫停';
+  el.notes.disabled = false;
   el.end.disabled = false;
   el.toLatest.classList.remove('show');
 
   el.final.classList.remove('show');
   el.copyView.classList.remove('show');
-  el.detail.classList.remove('show');
+  closeDetail();
+  $('live-setup').classList.remove('show');
   el.history.classList.remove('show');
   el.overlay.classList.remove('hide');
   el.start.disabled = false;
@@ -647,6 +698,7 @@ function goHome() {
   state.notesCheck = null;
   el.notesOpen.hidden = true;
   loadCourses();
+  renderRecent();
 }
 
 $('home').addEventListener('click', goHome);
@@ -676,35 +728,40 @@ function showHandcopy(md, nSections, check) {
   state.notesCheck = check;
   el.notesOpen.hidden = false;
   const wrap = el.copyBody;
-  wrap.innerHTML = '';
-  let ul = null;
-  for (const raw of md.split('\n')) {
-    const line = raw.trim();
-    if (!line || line.startsWith('<!--')) continue;
-    if (line.startsWith('## ')) {
-      const h = document.createElement('h2');
-      const t = line.slice(3);
-      if (t.startsWith('★')) h.className = 'exam';
-      h.textContent = t;
-      wrap.appendChild(h);
-      ul = document.createElement('ul');
-      wrap.appendChild(ul);
-    } else if (line.startsWith('# ')) {
-      const h = document.createElement('h1');
-      h.textContent = line.slice(2);
-      wrap.appendChild(h);
-      ul = null;
-    } else if (line.startsWith('- ')) {
-      if (!ul) { ul = document.createElement('ul'); wrap.appendChild(ul); }
-      const li = document.createElement('li');
-      li.textContent = line.slice(2);
-      ul.appendChild(li);
-    }
-  }
+  renderMd(wrap, md);
   const chars = md.replace(/<!--[\s\S]*?-->/g, '').replace(/\s/g, '').length;
   el.copyCount.textContent = `約 ${chars} 字 · 取自 ${nSections || 0} 段`;
   renderCheck(wrap, check);
   el.copyView.classList.add('show');
+}
+
+// 把筆記的 Markdown 畫出來：標題、條列、段落。逐字顯示 # 和 - 給一般人看沒有意義。
+function renderMd(wrap, md) {
+  wrap.innerHTML = '';
+  let ul = null;
+  for (const raw of (md || '').split('\n')) {
+    const line = raw.trim();
+    if (!line) { ul = null; continue; }
+    if (line.startsWith('<!--')) continue;
+    const heading = line.match(/^(#{1,4})\s+(.*)$/);
+    if (heading) {
+      const h = document.createElement(`h${Math.min(heading[1].length, 3)}`);
+      if (heading[2].startsWith('★')) h.className = 'exam';
+      h.textContent = heading[2].replace(/\*\*/g, '');
+      wrap.appendChild(h);
+      ul = null;
+    } else if (/^[-*]\s+/.test(line)) {
+      if (!ul) { ul = document.createElement('ul'); wrap.appendChild(ul); }
+      const li = document.createElement('li');
+      li.textContent = line.replace(/^[-*]\s+/, '').replace(/\*\*/g, '');
+      ul.appendChild(li);
+    } else {
+      const p = document.createElement('p');
+      p.textContent = line.replace(/\*\*/g, '');
+      wrap.appendChild(p);
+      ul = null;
+    }
+  }
 }
 
 // 正確性提示。刻意放在筆記**後面**而不是前面——它是輔助判斷，
@@ -761,108 +818,124 @@ function renderCheck(wrap, check) {
   wrap.appendChild(box);
 }
 
-// ── 歷史筆記（規格 §10 的資料都在，只是原本沒有介面看）────────────────
+// ── 紀錄清單 ──────────────────────────────────────────────────────────
+function jobOf(r) {
+  try { return JSON.parse(r.job || 'null') || {}; } catch (e) { return {}; }
+}
+const jobBusy = (j) => j.status === 'queued' || j.status === 'running';
+
+const STAGE_TEXT = {
+  queued: '排隊中',
+  decoding: '讀取檔案',
+  speakers: '分辨講者',
+  transcribing: '轉文字',
+  waiting_live: '等現場錄音結束',
+};
+function jobLabel(j) {
+  const t = STAGE_TEXT[j.stage] || '處理中';
+  return j.stage === 'transcribing' ? `${t} ${Math.round((j.progress || 0) * 100)}%` : t;
+}
+
+async function fetchCourseNames() {
+  if (state.courseNames.size) return state.courseNames;
+  try {
+    for (const c of await (await fetch('/api/courses')).json()) state.courseNames.set(c.id, c.name);
+  } catch (e) { /* 課名拿不到就顯示 id */ }
+  return state.courseNames;
+}
+
 async function openHistory() {
   el.history.classList.add('show');
   exitSelect();
   showBuild();
-  el.historyList.innerHTML = '';
   showUsage();
+  await renderHistory();
+}
+
+async function renderHistory() {
   let rows;
   try {
-    rows = await (await fetch('/api/sessions?limit=100')).json();
+    rows = await (await fetch('/api/sessions?limit=300')).json();
   } catch (e) {
-    toast('讀取歷史紀錄失敗：' + e.message);
+    toast('讀取紀錄失敗：' + e.message);
     return;
   }
-  const courses = new Map();
-  try {
-    for (const c of await (await fetch('/api/courses')).json()) courses.set(c.id, c.name);
-  } catch (e) { /* 課名拿不到就顯示 id */ }
-
+  const courses = await fetchCourseNames();
   state.rowsById.clear();
+  const q = $('history-search').value.trim().toLowerCase();
+  const openNames = new Set([...el.historyList.querySelectorAll('.cfold[open] .cname')]
+    .map((n) => n.textContent));
+  el.historyList.innerHTML = '';
 
-  // 照課名分資料夾。一門課上十八週就是十八筆，平鋪的話找上禮拜那堂
-  // 要滑很久；而且同一門課的紀錄本來就該放在一起看。
+  // 照分類分資料夾。一門課上十八週就是十八筆，平鋪的話要滑很久。
   const byCourse = new Map();
   for (const r of rows) {
     const name = courses.get(r.course_id) || r.course_id;
+    state.rowsById.set(r.id, r);
+    if (q && !`${r.note || ''} ${name} ${rowDate(r)}`.toLowerCase().includes(q)) continue;
     if (!byCourse.has(name)) byCourse.set(name, []);
     byCourse.get(name).push(r);
   }
-  // 最近上過的課排前面
   const order = [...byCourse.entries()].sort(
     (a, b) => (b[1][0].started_at || '').localeCompare(a[1][0].started_at || ''));
-
   for (const [name, list] of order) {
     const box = document.createElement('details');
     box.className = 'cfold';
-    box.innerHTML = '<summary><span class="cname"></span>' +
-                    '<span class="cmeta"></span></summary>';
+    box.innerHTML = '<summary><span class="cname"></span><span class="cmeta"></span></summary>';
     box.querySelector('.cname').textContent = name;
-    const latest = new Date(list[0].started_at);
-    box.querySelector('.cmeta').textContent =
-      `${list.length} 堂 · 最近 ` +
-      latest.toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
-    // 有沒結束的課就自動展開，那是使用者現在需要處理的
-    if (list.some((r) => !r.ended_at)) box.open = true;
-
-    for (const r of list) box.appendChild(historyRow(r, name));
+    box.querySelector('.cmeta').textContent = `${list.length} 筆`;
+    // 搜尋中、有需要處理的、或只有一個資料夾時直接展開
+    box.open = !!q || order.length === 1 || openNames.has(name)
+      || list.some((r) => jobBusy(jobOf(r)) || !r.ended_at);
+    for (const r of list) box.appendChild(historyRow(r, name, false));
     el.historyList.appendChild(box);
   }
+  if (!order.length) {
+    el.historyList.innerHTML = `<div class="empty-note">${q ? '找不到符合的紀錄' : '還沒有任何紀錄'}</div>`;
+  }
+  scheduleJobPoll(rows);
 }
 
-// 一列紀錄。課名已經在資料夾標題上，這裡只寫日期時間與長度。
-function historyRow(r, courseName) {
+function rowDate(r) {
+  return new Date(r.started_at).toLocaleString('zh-TW',
+    { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+// 一列紀錄。沒取名字的就用日期當標題。
+function historyRow(r, courseName, showCourse) {
+  const job = jobOf(r);
+  const live = state.running && !state.ended && r.id === state.sessionId;
   const btn = document.createElement('button');
   btn.className = 'hrow';
-  const started = new Date(r.started_at);
-  let dur = r.duration_s ? `${Math.round(r.duration_s / 60)} 分鐘` : '未完成';
-  // 合併結果沿用來源第一段的起始時間，不標出來的話跟來源長得一模一樣
+  btn.innerHTML = '<span class="hpick" aria-hidden="true"></span>' +
+    '<span class="hmain"><span class="hname"></span><span class="hmeta"></span></span>' +
+    '<span class="hbadge"></span>';
+  btn.querySelector('.hname').textContent = r.note || rowDate(r);
+  const bits = [];
+  if (r.note) bits.push(rowDate(r));
+  if (showCourse) bits.push(courseName);
+  const dur = r.duration_s || job.duration_s;
+  if (dur) bits.push(`${Math.max(1, Math.round(dur / 60))} 分鐘`);
   let mergedN = 0;
   try { mergedN = (JSON.parse(r.merged_from || '[]') || []).length; } catch (e) { }
-  if (mergedN) dur += ` · 合併 ${mergedN} 段`;
-  const done = !!r.ended_at;
-  btn.innerHTML =
-    '<span class="hpick" aria-hidden="true"></span>' +
-    '<span class="hmain"><span class="hcourse">' +
-    '<span class="htime"></span><span class="hnote"></span></span>' +
-    '<span class="hmeta"></span></span>' +
-    `<span class="hbadge${done ? ' done' : ''}"></span>`;
-  btn.querySelector('.htime').textContent =
-    started.toLocaleString('zh-TW', { dateStyle: 'short', timeStyle: 'short' });
-  // 備註接在時間後面：同一天同一門課錄好幾段，時間本身認不出是哪一段
-  btn.querySelector('.hnote').textContent = r.note ? ' · ' + r.note : '';
-  btn.querySelector('.hmeta').textContent = dur;
-  btn.querySelector('.hbadge').textContent = done ? '已完成' : '未結束';
+  if (mergedN) bits.push(`合併 ${mergedN} 段`);
+  btn.querySelector('.hmeta').textContent = bits.join(' · ');
+
+  const badge = btn.querySelector('.hbadge');
+  if (live) { badge.textContent = '錄音中'; badge.classList.add('busy'); }
+  else if (jobBusy(job)) { badge.textContent = jobLabel(job); badge.classList.add('busy'); }
+  else if (job.status === 'failed') { badge.textContent = '失敗'; badge.classList.add('fail'); }
+  else if (!r.ended_at) { badge.textContent = '未完成'; badge.classList.add('todo'); }
+  else badge.hidden = true;
+
   btn.addEventListener('click', () => {
     if (state.selecting) { toggleSelect(r); return; }
     openDetail(r.id, courseName);
   });
+  // 長按多選還是留著給熟的人用，但入口已經是清單上方的「選取」
   bindLongPress(btn, () => {
     if (!state.selecting) startSelect();
     toggleSelect(r);
-  });
-
-  const live = state.running && !state.ended && r.id === state.sessionId;
-  if (live) btn.querySelector('.hbadge').textContent = '錄音中';
-  state.rowsById.set(r.id, r);
-  if (state.selected.has(r.id)) btn.parentElement?.classList.add('picked');
-
-  const del = document.createElement('button');
-  del.className = 'hdel';
-  del.textContent = '刪除';
-  del.disabled = live;          // 正在錄的那堂不給刪
-  del.addEventListener('click', async (ev) => {
-    ev.stopPropagation();
-    if (!confirm(`刪除「${courseName} ${started.toLocaleDateString('zh-TW')}」？
-逐字稿、摘要、錄音都會一起刪掉，無法復原。`)) return;
-    try {
-      const res = await fetch(`/api/sessions/${r.id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      toast('已刪除');
-      openHistory();
-    } catch (e) { toast('刪除失敗：' + e.message); }
   });
 
   const wrap = document.createElement('div');
@@ -870,8 +943,38 @@ function historyRow(r, courseName) {
   if (state.selected.has(r.id)) wrap.classList.add('picked');
   wrap.dataset.sid = r.id;
   wrap.appendChild(btn);
-  wrap.appendChild(del);
   return wrap;
+}
+
+// 首頁的最近紀錄
+async function renderRecent() {
+  let rows;
+  try {
+    rows = await (await fetch('/api/sessions?limit=6')).json();
+  } catch (e) { return; }
+  const courses = await fetchCourseNames();
+  const list = $('recent-list');
+  list.innerHTML = '';
+  for (const r of rows) {
+    state.rowsById.set(r.id, r);
+    list.appendChild(historyRow(r, courses.get(r.course_id) || r.course_id, true));
+  }
+  $('recent-empty').hidden = rows.length > 0;
+  scheduleJobPoll(rows);
+}
+
+// 有檔案在轉文字時定期更新進度。沒有的話不打 API。
+let jobPollTimer = null;
+function scheduleJobPoll(rows) {
+  clearTimeout(jobPollTimer);
+  if (!rows.some((r) => jobBusy(jobOf(r)))) return;
+  jobPollTimer = setTimeout(() => {
+    if (document.visibilityState === 'hidden') { scheduleJobPoll(rows); return; }
+    if (el.detail.classList.contains('show')) { scheduleJobPoll(rows); return; }
+    if (el.history.classList.contains('show')) {
+      if (!state.selecting) renderHistory(); else scheduleJobPoll(rows);
+    } else if (!el.overlay.classList.contains('hide')) renderRecent();
+  }, 4000);
 }
 
 // ── 歷史清單的多選與合併 ──────────────────────────────────────────────
@@ -902,12 +1005,14 @@ function startSelect() {
   state.selecting = true;
   state.selected.clear();
   el.history.classList.add('selecting');
+  $('select-start').textContent = '完成';
 }
 
 function exitSelect() {
   state.selecting = false;
   state.selected.clear();
   el.history.classList.remove('selecting');
+  $('select-start').textContent = '選取';
   el.historyList.querySelectorAll('.hitem.picked')
     .forEach((n) => n.classList.remove('picked'));
   updateSelectBar();
@@ -926,18 +1031,18 @@ function toggleSelect(r) {
 function mergeability() {
   const rows = [...state.selected].map((id) => state.rowsById.get(id))
     .filter(Boolean);
-  if (rows.length < 2) return { ok: false, why: '選兩筆以上才能合併' };
+  if (rows.length < 2) return { ok: false, why: '' };
   const course = rows[0].course_id;
   const day = (rows[0].started_at || '').slice(0, 10);
   if (rows.some((r) => r.course_id !== course)) {
-    return { ok: false, why: '只能合併同一門課' };
+    return { ok: false, why: '只有同一個分類的才能合併' };
   }
   if (rows.some((r) => (r.started_at || '').slice(0, 10) !== day)) {
-    return { ok: false, why: '只能合併同一天' };
+    return { ok: false, why: '只有同一天的才能合併' };
   }
   const open = rows.filter((r) => !r.ended_at);
   if (open.length) {
-    return { ok: false, why: `有 ${open.length} 筆還沒結束，要先收尾` };
+    return { ok: false, why: `有 ${open.length} 筆還沒完成，不能合併` };
   }
   return { ok: true, rows };
 }
@@ -950,6 +1055,7 @@ function updateSelectBar() {
   el.selectCount.textContent = `已選 ${state.selected.size} 筆`;
   el.selectWhy.textContent = m.ok ? '' : m.why;
   el.selectMerge.disabled = !m.ok;
+  el.selectMerge.hidden = state.selected.size < 2;
 }
 
 async function mergeSelected() {
@@ -957,9 +1063,11 @@ async function mergeSelected() {
   if (!m.ok) return;
   const mins = Math.round(
     m.rows.reduce((s, r) => s + (r.duration_s || 0), 0) / 60);
-  if (!confirm(`把選到的 ${m.rows.length} 段接成一堂並重新產生總筆記？
-共約 ${mins} 分鐘。原本那幾筆不會被刪掉，合併後會多一筆新紀錄。
-錄音檔也會接起來，過程約三到五分鐘。`)) return;
+  if (!await ask({
+    title: `把 ${m.rows.length} 段接成一筆？`,
+    message: `共約 ${mins} 分鐘，會重新產生筆記，大約要三到五分鐘。\n原本那幾筆不會被刪掉，合併後會多一筆新紀錄。`,
+    ok: '合併',
+  })) return;
   el.selectMerge.disabled = true;
   el.selectMerge.textContent = '合併中…';
   try {
@@ -984,18 +1092,37 @@ async function mergeSelected() {
   }
 }
 
+async function deleteSelected() {
+  const n = state.selected.size;
+  if (!n) return;
+  if (!await ask({
+    title: `刪除這 ${n} 筆紀錄？`,
+    message: '逐字稿、筆記和錄音都會一起刪掉，無法復原。',
+    ok: '刪除', danger: true,
+  })) return;
+  let failed = 0;
+  for (const id of [...state.selected]) {
+    try {
+      const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+      if (!res.ok) failed += 1;
+    } catch (e) { failed += 1; }
+  }
+  toast(failed ? `有 ${failed} 筆刪除失敗` : '已刪除');
+  exitSelect();
+  renderHistory();
+}
+
 // 投影片對照：把逐字稿對到教材的頁碼。
 // 涵蓋率通常不高（實測一堂 21%）——老師講投影片以外的東西、Q&A、
 // 純圖片的頁都對不上。所以這裡把涵蓋率直接寫出來，不要讓使用者
 // 以為沒列到的部分是漏掉了。
-function renderAlign(id, d, addSec, a) {
+function renderAlign(id, d, sec, a, onJump) {
   const has = a && a.pages && a.pages.length;
-  const sec = addSec('投影片對照',
-                     has ? null : '還沒對照過，或這堂沒有對到任何投影片');
 
   const row = document.createElement('div');
-  row.className = 'row';
+  row.className = 'btns';
   const go = document.createElement('button');
+  go.className = 'btn';
   go.textContent = has ? '重新對照' : '對照投影片';
   go.addEventListener('click', async () => {
     go.disabled = true;
@@ -1005,7 +1132,7 @@ function renderAlign(id, d, addSec, a) {
       const j = await res.json();
       if (!res.ok) throw new Error(j.detail || ('HTTP ' + res.status));
       toast(`對到 ${j.pages.length} 段、涵蓋 ${Math.round(j.coverage * 100)}%`);
-      openDetail(id, el.detailTitle.textContent.split(' · ')[0]);
+      openDetail(id, d.courseName, true);
     } catch (e) {
       toast('對照失敗：' + e.message);
       go.disabled = false;
@@ -1037,7 +1164,10 @@ function renderAlign(id, d, addSec, a) {
       li.querySelector('.pt').textContent =
         `${fmt(e.start_s)}–${fmt(e.end_s)}　${e.score.toFixed(2)}`;
       // 詳細頁裡沒有即時逐字稿可以跳，要跳到對應的那一則課中整理
-      li.querySelector('.pjump').addEventListener('click', () => jumpToNote(e.start_s));
+      li.querySelector('.pjump').addEventListener('click', () => {
+        onJump();
+        jumpToNote(e.start_s);
+      });
       ul.appendChild(li);
     }
     sec.appendChild(ul);
@@ -1052,12 +1182,12 @@ async function resumeSession(d) {
   try {
     await startAudio();
   } catch (e) {
-    alert('無法取得麥克風：' + e.message);
+    await ask({ title: '沒辦法使用麥克風', message: micHelp(e), ok: '知道了', cancel: null });
     return;
   }
   await acquireWakeLock();
 
-  el.detail.classList.remove('show');
+  closeDetail();
   el.history.classList.remove('show');
   el.overlay.classList.add('hide');
 
@@ -1118,8 +1248,6 @@ function jumpToNote(startS) {
   for (const n of all) {
     if (parseFloat(n.dataset.start) <= startS + 1) target = n;
   }
-  const holder = target.closest('details.dsec');
-  if (holder) holder.open = true;
   target.open = true;
   target.scrollIntoView({ behavior: 'smooth', block: 'center' });
   target.classList.add('flash');
@@ -1150,155 +1278,487 @@ async function showBuild() {
   } catch (e) { el2.textContent = ''; }
 }
 
-// 同一天被拆成好幾段錄的課，合併成一堂重新產生總筆記
-
 async function showUsage() {
   const bar = $('usage');
   try {
     const u = await (await fetch('/api/storage')).json();
     const gb = (n) => (n / 1e9).toFixed(1);
-    const mb = (n) => Math.round(n / 1e6);
-    let txt = `${u.sessions} 堂課 · 資料庫 ${mb(u.db_bytes)} MB`;
-    if (u.audio_files) {
-      const perHour = u.audio_bytes / Math.max(1, u.audio_files) / 1e6;
-      txt += ` · 錄音 ${u.audio_files} 個共 ${mb(u.audio_bytes)} MB`;
-    }
-    txt += ` · 硬碟剩 ${gb(u.disk_free_bytes)} GB`;
-    if (!u.save_audio) txt += '（未開啟錄音保存）';
+    let txt = `${u.sessions} 筆紀錄`;
+    txt += ` · 硬碟還剩 ${gb(u.disk_free_bytes)} GB`;
     bar.textContent = txt;
   } catch (e) { bar.textContent = ''; }
 }
 
-// 單堂課的完整紀錄：錄音、課中整理、課後整理、逐字稿放在同一頁
-async function openDetail(id, courseName) {
+// ── 單筆紀錄 ──────────────────────────────────────────────────────────
+function speakerName(d, n) {
+  return (d.names && d.names[String(n)]) || `講者 ${n}`;
+}
+const spkClass = (n) => `spk-${((n - 1) % 6) + 1}`;
+
+async function fetchJson(url, opts) {
+  const res = await fetch(url, opts);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.detail || ('HTTP ' + res.status));
+  return j;
+}
+const postJson = (url, body) => fetchJson(url, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body || {}),
+});
+
+let detailPoll = null;
+async function openDetail(id, courseName, keepTab) {
+  clearTimeout(detailPoll);
   el.detail.classList.add('show');
-  el.detailTitle.textContent = courseName || '課堂紀錄';
-  el.detailBody.innerHTML = '<div class="dsec"><span class="empty">載入中…</span></div>';
+  state.detailId = id;
+  const prevTab = keepTab ? state.detailTab : null;
   let d;
   try {
     d = await (await fetch(`/api/sessions/${id}`)).json();
+    if (!d.session) throw new Error('找不到這筆紀錄');
   } catch (e) {
     el.detailBody.innerHTML = '';
-    addSec('讀取失敗', e.message);
+    el.detailBody.appendChild(infoCard('bad', '讀取失敗', e.message));
     return;
   }
+  if (state.detailId !== id) return;
+  const s = d.session;
   d.courseName = courseName;
-  const started = new Date(d.session.started_at);
-  el.detailTitle.textContent =
-    `${courseName} · ${started.toLocaleString('zh-TW', { dateStyle: 'short', timeStyle: 'short' })}`;
-  el.detailBody.innerHTML = '';
+  d.job = jobOf(s);
+  try { d.names = JSON.parse(s.speaker_names || '{}') || {}; } catch (e) { d.names = {}; }
+  const busy = jobBusy(d.job);
+  const body = el.detailBody;
+  body.innerHTML = '';
+  el.detailTitle.textContent = courseName || '紀錄';
 
-  // 0. 備註。同一天同一門課錄好幾段，回頭找的時候只看時間認不出哪段是哪段。
-  {
-    const sec = addSec('備註', null);
-    const row = document.createElement('div');
-    row.className = 'noterow';
-    const inp = document.createElement('input');
-    inp.type = 'text';
-    inp.placeholder = '例如：補課、分組討論、老師講考試範圍';
-    inp.value = d.session.note || '';
-    inp.maxLength = 40;
-    const save = document.createElement('button');
-    save.className = 'act';
-    save.textContent = '儲存';
-    const commit = async () => {
-      save.disabled = true;
-      try {
-        const res = await fetch(`/api/sessions/${id}/note`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ note: inp.value }),
-        });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        toast('備註已存');
-      } catch (e) { toast('備註儲存失敗：' + e.message); }
-      save.disabled = false;
-    };
-    save.addEventListener('click', commit);
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') commit(); });
-    row.appendChild(inp);
-    row.appendChild(save);
-    sec.appendChild(row);
+  // 名稱：同一天好幾筆時，光看時間認不出是哪一筆
+  const name = document.createElement('input');
+  name.type = 'text';
+  name.className = 'd-name';
+  name.value = s.note || '';
+  name.placeholder = '幫這筆紀錄取個名字';
+  name.maxLength = 40;
+  name.setAttribute('aria-label', '名稱');
+  name.addEventListener('change', async () => {
+    try {
+      await postJson(`/api/sessions/${id}/note`, { note: name.value });
+      toast('名稱已存');
+    } catch (e) { toast('儲存失敗：' + e.message); }
+  });
+  name.addEventListener('keydown', (e) => { if (e.key === 'Enter') name.blur(); });
+  body.appendChild(name);
+
+  const metaBits = [new Date(s.started_at).toLocaleString('zh-TW',
+    { dateStyle: 'medium', timeStyle: 'short', hour12: false })];
+  const dur = s.duration_s || d.job.duration_s;
+  if (dur) metaBits.push(`${Math.max(1, Math.round(dur / 60))} 分鐘`);
+  const meta = document.createElement('p');
+  meta.className = 'd-meta';
+  meta.textContent = metaBits.join(' · ');
+  body.appendChild(meta);
+
+  if (busy) {
+    renderJobCard(body, d);
+    detailPoll = setTimeout(() => {
+      if (el.detail.classList.contains('show') && state.detailId === id) openDetail(id, courseName, true);
+    }, 4000);
+    return;                      // 處理中沒有內容可看
+  }
+  if (d.job.status === 'failed') renderFailedCard(body, d, id, courseName);
+  if (!s.ended_at && d.job.status !== 'failed') renderUnfinishedCard(body, d, id, courseName);
+  if (d.job.notes_error) {
+    body.appendChild(infoCard('warn', '逐字稿好了，但筆記沒有產生', d.job.notes_error));
+  }
+  if (d.job.empty) {
+    body.appendChild(infoCard('warn', '沒有辨識到語音', '這個檔案裡可能沒有人說話，或聲音太小。'));
   }
 
-  // 1. 錄音
+  let player = null;
   if (d.has_audio) {
-    const sec = addSec('錄音', null);
-    const a = document.createElement('audio');
-    a.controls = true;
-    a.preload = 'none';
-    a.src = `/api/sessions/${id}/audio`;
-    sec.appendChild(a);
-  } else {
-    addSec('錄音', '沒有保存（要保存請在伺服器設 LS_SAVE_AUDIO=1）');
-  }
-
-  // 1.5 沒有正常結束的課：給一個把它收尾的出口。
-  //     手機睡著或網路斷掉就會留下這種紀錄，逐字稿都在，只差沒收尾。
-  //     沒有這顆按鈕的話，那堂課永遠停在「未結束」，既不能繼續也不能結束。
-  if (!d.session.ended_at) {
-    const sec = addSec('這堂課沒有正常結束',
-                       d.resumable
-                         ? `逐字稿有 ${d.segments.length} 段。可以接回去繼續錄，`
-                           + '或直接收尾產生筆記'
-                         : `逐字稿有 ${d.segments.length} 段。伺服器重啟過，`
-                           + '接不回去了，只能收尾',
-                       null, true);
-
-    // 這兩顆要用詳細頁自己的按鈕樣式（.dbtns）。之前掛的是 .primary，
-    // 但那個只在 #overlay 底下有定義，在這裡等於完全沒樣式。
-    const bar = document.createElement('div');
-    bar.className = 'dbtns';
-    sec.appendChild(bar);
-
-    // 手機睡著、網路斷掉之後回來，多半是想把剩下的課錄完，不是想結束。
-    // session 還在伺服器的重連佇列裡就接得回去。
-    if (d.resumable) {
-      const r = document.createElement('button');
-      r.className = 'act';
-      r.textContent = '接續錄音';
-      r.addEventListener('click', () => resumeSession(d));
-      bar.appendChild(r);
-    }
-
-    const b = document.createElement('button');
-    if (!d.resumable) b.className = 'act';
-    b.textContent = '結束並產生筆記';
-    b.addEventListener('click', async () => {
-      b.disabled = true;
-      b.textContent = '產生中…（課後模型，約一到三分鐘）';
-      try {
-        const res = await fetch(`/api/sessions/${id}/finish`, { method: 'POST' });
-        const j = await res.json();
-        if (!res.ok) throw new Error(j.detail || ('HTTP ' + res.status));
-        toast('已收尾');
-        openDetail(id, courseName);
-      } catch (e) {
-        toast('收尾失敗：' + e.message);
-        b.disabled = false;
-        b.textContent = '結束並產生筆記';
-      }
+    const holder = document.createElement('div');
+    holder.className = 'player';
+    player = document.createElement('audio');
+    player.controls = true;
+    player.preload = 'metadata';
+    player.playsInline = true;
+    player.src = `/api/sessions/${id}/audio`;
+    // 播不了的話時間按鈕也沒用，講清楚而不是放一個一直轉圈的播放器
+    player.addEventListener('error', () => {
+      holder.textContent = '這台裝置播不了這段錄音，可以到電腦上聽。';
+      holder.className = 'hint d-block';
     });
-    bar.appendChild(b);
+    holder.appendChild(player);
+    body.appendChild(holder);
   }
 
-  // 1.8 投影片對照。包 try：任何一節出錯都不該讓後面的筆記整個不渲染
-  //（發生過一次——addSec 不在作用域裡，結果詳細頁只剩錄音那一節）
-  let align = null;
-  try {
-    align = await (await fetch(`/api/sessions/${id}/align`)).json();
-    if (!align || !align.pages || !align.pages.length) align = null;
-  } catch (e) { align = null; }
-  try {
-    renderAlign(id, d, addSec, align);
-  } catch (e) {
-    addSec('投影片對照', '載入失敗：' + e.message);
+  // 分頁：只放這筆真的有內容的。原本六個收合區塊全部列出來，一半是空的。
+  const tabs = document.createElement('div');
+  tabs.className = 'tabs';
+  tabs.setAttribute('role', 'tablist');
+  body.appendChild(tabs);
+  const panels = new Map();
+  const addTab = (key, title, count) => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.setAttribute('role', 'tab');
+    b.textContent = title;
+    if (count) {
+      const n = document.createElement('span');
+      n.className = 'n';
+      n.textContent = count;
+      b.appendChild(n);
+    }
+    b.addEventListener('click', () => selectTab(key));
+    tabs.appendChild(b);
+    const p = document.createElement('div');
+    p.className = 'panel';
+    body.appendChild(p);
+    panels.set(key, { tab: b, panel: p });
+    return p;
+  };
+  const selectTab = (key) => {
+    state.detailTab = key;
+    for (const [k, v] of panels) {
+      v.tab.classList.toggle('on', k === key);
+      v.tab.setAttribute('aria-selected', k === key ? 'true' : 'false');
+      v.panel.classList.toggle('on', k === key);
+    }
+  };
+
+  const hc = s.handcopy_md;
+  const fm = s.final_md;
+  if (hc || fm) renderNotesTab(addTab('notes', '筆記'), id, hc, fm);
+  renderTranscriptTab(addTab('transcript', '逐字稿'), d, id, courseName, player);
+
+  if (d.sections.length) {
+    const p = addTab('sections', '課中整理', String(d.sections.length));
+    let align = null;
+    try {
+      align = await (await fetch(`/api/sessions/${id}/align`)).json();
+      if (!align || !align.pages || !align.pages.length) align = null;
+    } catch (e) { align = null; }
+    renderSections(p, d.sections, align);
   }
 
-  // 2. 課中整理：每次按「即時整理」產生的段落
-  const secWrap = addSec(`課中整理`, d.sections.length ? null : '這堂課沒有按過即時整理',
-                         d.sections.length ? `${d.sections.length} 段` : '');
-  for (const sc of d.sections) {
+  // 投影片對照只有這門課放了教材才有意義
+  try {
+    const m = await (await fetch('/api/materials')).json();
+    const hasMaterial = (m.groups || []).some((g) => g.known
+      && (g.folder === s.course_id || g.course === courseName || g.folder === courseName));
+    if (hasMaterial) {
+      let align = null;
+      try {
+        align = await (await fetch(`/api/sessions/${id}/align`)).json();
+        if (!align || !align.pages || !align.pages.length) align = null;
+      } catch (e) { align = null; }
+      const p = addTab('slides', '投影片');
+      renderAlign(id, d, p, align, () => {
+        selectTab('sections');
+      });
+    }
+  } catch (e) { /* 拿不到教材清單就不顯示這一頁 */ }
+
+  const wanted = prevTab && panels.has(prevTab) ? prevTab
+    : (panels.has('notes') ? 'notes' : 'transcript');
+  selectTab(wanted);
+
+  $('detail-delete').onclick = async () => {
+    if (!await ask({
+      title: '刪除這筆紀錄？',
+      message: '逐字稿、筆記和錄音都會一起刪掉，無法復原。',
+      ok: '刪除', danger: true,
+    })) return;
+    try {
+      await fetchJson(`/api/sessions/${id}`, { method: 'DELETE' });
+      toast('已刪除');
+      closeDetail();
+    } catch (e) { toast('刪除失敗：' + e.message); }
+  };
+}
+
+function infoCard(kind, title, msg) {
+  const c = document.createElement('div');
+  c.className = `card ${kind} d-block`;
+  const h = document.createElement('h3');
+  h.textContent = title;
+  c.appendChild(h);
+  if (msg) {
+    const p = document.createElement('p');
+    p.textContent = msg;
+    c.appendChild(p);
+  }
+  return c;
+}
+
+function renderJobCard(body, d) {
+  const j = d.job;
+  const c = infoCard('', jobLabel(j), j.stage === 'waiting_live'
+    ? '有人正在現場錄音，等錄音結束會自動繼續。'
+    : '在伺服器上處理，可以關掉這個畫面。一小時的錄音大約要 6 分鐘。');
+  c.classList.add('d-block');
+  const pct = j.stage === 'transcribing' ? (j.progress || 0) : 0;
+  const track = document.createElement('div');
+  track.className = 'bar-track';
+  track.innerHTML = '<div class="bar-fill"></div>';
+  track.firstChild.style.width = `${Math.max(3, pct * 100)}%`;
+  c.appendChild(track);
+  body.appendChild(c);
+  $('detail-delete').onclick = async () => {
+    if (!await ask({ title: '取消並刪除這筆？', message: '上傳的錄音也會一起刪掉。', ok: '刪除', danger: true })) return;
+    try {
+      await fetchJson(`/api/sessions/${d.session.id}`, { method: 'DELETE' });
+      toast('已取消');
+      closeDetail();
+    } catch (e) { toast('取消失敗：' + e.message); }
+  };
+}
+
+function renderFailedCard(body, d, id, courseName) {
+  const c = infoCard('bad', '轉文字失敗', d.job.error || '');
+  const b = document.createElement('button');
+  b.className = 'btn';
+  b.textContent = '重試';
+  b.addEventListener('click', async () => {
+    b.disabled = true;
+    try {
+      await postJson(`/api/sessions/${id}/retranscribe`, { speakers: d.job.speakers || 0 });
+      openDetail(id, courseName);
+    } catch (e) { toast('重試失敗：' + e.message); b.disabled = false; }
+  });
+  c.appendChild(b);
+  body.appendChild(c);
+}
+
+// 手機睡著或網路斷掉會留下這種紀錄，逐字稿都在，只差沒收尾。
+function renderUnfinishedCard(body, d, id, courseName) {
+  const c = infoCard('warn', '這筆錄音沒有正常結束',
+    d.resumable ? '可以接回去繼續錄，或直接結束並產生筆記。' : '已有的逐字稿都還在，可以直接結束並產生筆記。');
+  const bar = document.createElement('div');
+  bar.className = 'btns';
+  c.appendChild(bar);
+  if (d.resumable) {
+    const r = document.createElement('button');
+    r.className = 'btn primary';
+    r.textContent = '繼續錄音';
+    r.addEventListener('click', () => resumeSession(d));
+    bar.appendChild(r);
+  }
+  const b = document.createElement('button');
+  b.className = d.resumable ? 'btn' : 'btn primary';
+  b.textContent = '結束並產生筆記';
+  b.addEventListener('click', async () => {
+    b.disabled = true;
+    b.textContent = '產生中，約一到三分鐘…';
+    try {
+      await postJson(`/api/sessions/${id}/finish`);
+      toast('完成');
+      openDetail(id, courseName);
+    } catch (e) {
+      toast('失敗：' + e.message);
+      b.disabled = false;
+      b.textContent = '結束並產生筆記';
+    }
+  });
+  bar.appendChild(b);
+  body.appendChild(c);
+}
+
+function renderTranscriptTab(p, d, id, courseName, player) {
+  const segs = d.segments;
+  if (!segs.length) {
+    const e = document.createElement('div');
+    e.className = 'empty-note';
+    e.textContent = '這筆沒有逐字稿';
+    p.appendChild(e);
+    return;
+  }
+  const tools = document.createElement('div');
+  tools.className = 'tools';
+  p.appendChild(tools);
+
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.placeholder = '搜尋逐字稿';
+  search.setAttribute('aria-label', '搜尋逐字稿');
+  tools.appendChild(search);
+
+  const speakers = [...new Set(segs.map((g) => g.speaker).filter(Boolean))].sort((a, b) => a - b);
+  if (speakers.length) {
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    for (const n of speakers) {
+      const c = document.createElement('button');
+      c.className = `chip ${spkClass(n)}`;
+      c.textContent = speakerName(d, n);
+      c.title = '改名';
+      c.addEventListener('click', async () => {
+        const v = await ask({
+          title: `這位是誰？`,
+          message: `取了名字之後，逐字稿和下載的檔案都會用這個名字。`,
+          input: { value: d.names[String(n)] || '', placeholder: `講者 ${n}`, maxLength: 20 },
+          ok: '儲存',
+        });
+        if (v === false) return;
+        const names = { ...d.names };
+        if (v.trim()) names[String(n)] = v.trim(); else delete names[String(n)];
+        try {
+          await postJson(`/api/sessions/${id}/speakers`, { names });
+          openDetail(id, courseName, true);
+        } catch (e) { toast('儲存失敗：' + e.message); }
+      });
+      chips.appendChild(c);
+    }
+    tools.appendChild(chips);
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = '講者是用聲音自動分的，可能會認錯。點名字可以改名，點時間可以聽原音確認。';
+    tools.appendChild(hint);
+  }
+  // 分錯人數是最常見的狀況，要給一條能自己修的路
+  if (d.has_audio && d.job.diarize !== false && d.session.course_id === 'meeting') {
+    const again = document.createElement('button');
+    again.className = 'btn';
+    again.textContent = speakers.length ? '人數不對？重新分辨講者' : '標出誰講了什麼';
+    again.addEventListener('click', async () => {
+      const v = await ask({
+        title: '這段錄音有幾個人講話？',
+        message: '會用保存的錄音重新轉一次，一小時大約要 6 分鐘。已取的名字要重新對照。',
+        select: {
+          value: d.job.speakers || 0,
+          options: [[0, '不確定，自動判斷'], ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => [n, `${n} 人`])],
+        },
+        ok: '開始',
+      });
+      if (v === false) return;
+      try {
+        await postJson(`/api/sessions/${id}/retranscribe`, { speakers: Number(v) });
+        openDetail(id, courseName);
+      } catch (e) { toast('無法開始：' + e.message); }
+    });
+    tools.appendChild(again);
+  }
+
+  const box = document.createElement('div');
+  box.className = 'lines';
+  p.appendChild(box);
+  const rows = [];
+  let prevSpk = null;
+  for (const g of segs) {
+    const ln = document.createElement('div');
+    ln.className = 'ln' + (g.avg_logprob != null && g.avg_logprob < -0.9 ? ' low' : '');
+    const t = document.createElement('button');
+    t.className = 't' + (player ? ' can' : '');
+    t.textContent = fmt(g.start_s);
+    if (player) {
+      t.setAttribute('aria-label', `從 ${fmt(g.start_s)} 開始播放`);
+      t.addEventListener('click', () => seekAudio(player, g.start_s));
+    } else t.disabled = true;
+    ln.appendChild(t);
+    const b = document.createElement('div');
+    b.className = 'b';
+    if (g.speaker && g.speaker !== prevSpk) {
+      const w = document.createElement('span');
+      w.className = `who ${spkClass(g.speaker)}`;
+      w.textContent = speakerName(d, g.speaker);
+      b.appendChild(w);
+    }
+    prevSpk = g.speaker;
+    const x = document.createElement('span');
+    x.className = 'x';
+    x.textContent = g.text;
+    b.appendChild(x);
+    ln.appendChild(b);
+    box.appendChild(ln);
+    rows.push({ ln, x, text: g.text, who: g.speaker ? speakerName(d, g.speaker) : '' });
+  }
+  search.addEventListener('input', () => {
+    const q = search.value.trim();
+    const lower = q.toLowerCase();
+    for (const r of rows) {
+      const hit = !q || r.text.toLowerCase().includes(lower) || r.who.includes(q);
+      r.ln.hidden = !hit;
+      r.x.textContent = r.text;
+      if (q && hit) {
+        const i = r.text.toLowerCase().indexOf(lower);
+        if (i >= 0) {
+          r.x.textContent = '';
+          const m = document.createElement('mark');
+          m.textContent = r.text.slice(i, i + q.length);
+          r.x.append(r.text.slice(0, i), m, r.text.slice(i + q.length));
+        }
+      }
+    }
+  });
+  p.appendChild(downloadRow([
+    ['下載文字檔', () => dl(id, 'txt', 'transcript')],
+    ['下載 Word', () => dl(id, 'docx', 'transcript')],
+  ]));
+}
+
+// iOS 要先載入中繼資料才設得了 currentTime，而且 play() 要在點擊當下呼叫
+function seekAudio(player, t) {
+  const go = () => {
+    player.currentTime = t;
+    const r = player.play();
+    if (r && r.catch) r.catch(() => {});
+  };
+  if (player.readyState >= 1) { go(); return; }
+  player.addEventListener('loadedmetadata', go, { once: true });
+  player.load();
+}
+
+function downloadRow(pairs) {
+  const r = document.createElement('div');
+  r.className = 'btns dl-row';
+  for (const [label, fn] of pairs) {
+    const b = document.createElement('button');
+    b.className = 'btn';
+    b.textContent = label;
+    b.addEventListener('click', fn);
+    r.appendChild(b);
+  }
+  return r;
+}
+
+function renderNotesTab(p, id, hc, fm) {
+  const content = document.createElement('div');
+  const show = (which) => {
+    content.innerHTML = '';
+    const md = which === 'handcopy' ? hc : fm;
+    const box = document.createElement('div');
+    box.className = 'md';
+    renderMd(box, md);
+    content.appendChild(box);
+    content.appendChild(downloadRow([
+      ['複製', () => copyText(md)],
+      ['下載 Word', () => dl(id, 'docx', which)],
+    ]));
+  };
+  if (hc && fm) {
+    const tg = document.createElement('div');
+    tg.className = 'seg-toggle';
+    const add = (label, which) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        tg.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
+        b.classList.add('on');
+        show(which);
+      });
+      tg.appendChild(b);
+      return b;
+    };
+    add('精簡版', 'handcopy').classList.add('on');
+    add('完整版', 'full');
+    p.appendChild(tg);
+  }
+  p.appendChild(content);
+  show(hc ? 'handcopy' : 'full');
+}
+
+function renderSections(p, sections, align) {
+  for (const sc of sections) {
     const det = document.createElement('details');
     det.className = 'sec';
     det.innerHTML = '<summary><span class="ts"></span><span class="title"></span>' +
@@ -1322,105 +1782,30 @@ async function openDetail(id, courseName) {
       n.textContent = '標註：' + sc.user_note;
       det.appendChild(n);
     }
-    secWrap.appendChild(det);
-  }
-
-  // 3. 課後整理
-  const hc = d.session.handcopy_md;
-  const sec3 = addSec('課後整理 · 手抄版',
-                      hc ? null : '這堂課沒有按「結束課程」，所以沒有課後整理');
-  if (hc) {
-    const pre = document.createElement('pre');
-    pre.textContent = hc.replace(/<!--[\s\S]*?-->/g, '').trim();
-    sec3.appendChild(pre);
-    sec3.appendChild(btnRow([
-      ['複製', () => copyText(hc)],
-      ['.md', () => dl(id, 'md', 'handcopy')],
-      ['Word', () => dl(id, 'docx', 'handcopy')],
-    ]));
-  }
-
-  const fm = d.session.final_md;
-  const sec4 = addSec('課後整理 · 完整版', fm ? null : '同上');
-  if (fm) {
-    const pre = document.createElement('pre');
-    pre.textContent = fm;
-    sec4.appendChild(pre);
-    sec4.appendChild(btnRow([
-      ['複製', () => copyText(fm)],
-      ['.md', () => dl(id, 'md', 'full')],
-      ['Word', () => dl(id, 'docx', 'full')],
-    ]));
-  }
-
-  // 4. 逐字稿
-  const sec5 = addSec('逐字稿', d.segments.length ? null : '無', `${d.segments.length} 段`);
-  if (d.segments.length) {
-    const box = document.createElement('div');
-    box.className = 'dsegs';
-    for (const g of d.segments) {
-      const ln = document.createElement('div');
-      ln.className = 'ln';
-      ln.innerHTML = '<span class="t"></span><span class="x"></span>';
-      ln.querySelector('.t').textContent = fmt(g.start_s);
-      ln.querySelector('.x').textContent = g.text;
-      box.appendChild(ln);
-    }
-    sec5.appendChild(box);
-    sec5.appendChild(btnRow([
-      ['.txt', () => dl(id, 'txt', 'transcript')],
-      ['Word', () => dl(id, 'docx', 'transcript')],
-    ]));
-  }
-
-  // 每一節都可以收合，而且預設收起。一堂課的詳細頁有錄音、投影片對照、
-  // 課中整理、手抄版、完整版、逐字稿六節，全部攤開要滑很久才找得到
-  // 想看的那一節。open=true 只留給「需要你動作」的那種（沒正常結束）。
-  function addSec(title, emptyMsg, count, open) {
-    const div = document.createElement('details');
-    div.className = 'dsec';
-    div.open = !!open;
-    const h = document.createElement('summary');
-    const t = document.createElement('span');
-    t.className = 'dtitle';
-    t.textContent = title;
-    h.appendChild(t);
-    if (count) {
-      const n = document.createElement('span');
-      n.className = 'n';
-      n.textContent = count;
-      h.appendChild(n);
-    }
-    div.appendChild(h);
-    const body = document.createElement('div');
-    body.className = 'dbody';
-    div.appendChild(body);
-    if (emptyMsg) {
-      const e = document.createElement('span');
-      e.className = 'empty';
-      e.textContent = emptyMsg;
-      body.appendChild(e);
-    }
-    el.detailBody.appendChild(div);
-    // 回傳 body：呼叫端 appendChild 的東西要進到可收合的區域裡，
-    // 不是跟 summary 同層，否則收起來之後內容還留在畫面上
-    return body;
-  }
-  function btnRow(pairs) {
-    const r = document.createElement('div');
-    r.className = 'dbtns';
-    for (const [label, fn] of pairs) {
-      const b = document.createElement('button');
-      b.textContent = label;
-      b.addEventListener('click', fn);
-      r.appendChild(b);
-    }
-    return r;
+    p.appendChild(det);
   }
 }
 
+function closeDetail() {
+  clearTimeout(detailPoll);
+  state.detailId = null;
+  const a = el.detailBody.querySelector('audio');
+  if (a) a.pause();
+  el.detail.classList.remove('show');
+  if (el.history.classList.contains('show')) renderHistory();
+  else if (!el.overlay.classList.contains('hide')) renderRecent();
+}
+
+// iPhone 主畫面版開附件會蓋掉整個 App 而且回不來，要開到外部 Safari
 function dl(id, format, which) {
-  location.href = `/api/sessions/${id}/export?format=${format}&which=${which}`;
+  const url = `/api/sessions/${id}/export?format=${format}&which=${which}`;
+  if (navigator.standalone) { window.open(url, '_blank'); return; }
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 async function copyText(t) {
@@ -1429,20 +1814,9 @@ async function copyText(t) {
     toast('已複製');
   } catch (e) { toast('複製失敗：' + e.message); }
 }
-$('final-close').addEventListener('click', () => el.final.classList.remove('show'));
-$('copy-md').addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(state.finalMd); toast('已複製'); }
-  catch (e) { toast('複製失敗：' + e.message); }
-});
-$('download-md').addEventListener('click', () => {
-  const id = state.viewingSession || state.sessionId;
-  if (!id) return;
-  location.href = `/api/sessions/${id}/export?format=md`;
-});
 $('sum-toggle').addEventListener('click', toggleAllSections);
 $('open-history').addEventListener('click', openHistory);
-// 標頭那顆：錄音中也能看紀錄。原本入口只在開始畫面上，一開始錄就被
-// 蓋掉了，而標頭唯一的「首頁」按下去是會結束這堂課的。
+// 標頭那顆：錄音中也能看紀錄，「離開」按下去是會結束錄音的。
 $('hist-top').addEventListener('click', openHistory);
 el.notes.addEventListener('click', requestNotes);
 $('copy-close').addEventListener('click', () => el.copyView.classList.remove('show'));
@@ -1452,10 +1826,6 @@ el.notesOpen.addEventListener('click', () => {
 $('select-cancel').addEventListener('click', exitSelect);
 el.selectMerge.addEventListener('click', mergeSelected);
 $('copy-refresh').addEventListener('click', requestNotes);
-$('copy-dl-md').addEventListener('click', () => {
-  const id = state.viewingSession || state.sessionId;
-  if (id) dl(id, 'md', 'handcopy');
-});
 $('copy-docx').addEventListener('click', () => {
   const id = state.viewingSession || state.sessionId;
   if (id) dl(id, 'docx', 'handcopy');
@@ -1469,11 +1839,277 @@ $('copy-text').addEventListener('click', async () => {
 $('history-close').addEventListener('click', () => {
   exitSelect();
   el.history.classList.remove('show');
+  renderRecent();
 });
-$('detail-close').addEventListener('click', () => {
-  el.detail.classList.remove('show');
-  if (el.history.classList.contains('show')) openHistory();
+$('detail-close').addEventListener('click', closeDetail);
+
+// ── 上傳 ──────────────────────────────────────────────────────────────
+// 分塊送，每塊成功才往前。iPhone 鎖屏或切走時請求會斷，回來問伺服器收到哪裡接著傳。
+const CHUNK_BYTES = 4 * 1024 * 1024;
+const UP_KEY = 'nobook.uploads';
+const up = { items: [], running: false, cancelled: false };
+
+function fmtSize(n) {
+  return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 1e6))} MB`;
+}
+
+function resumeMap() {
+  try { return JSON.parse(localStorage.getItem(UP_KEY) || '{}') || {}; } catch (e) { return {}; }
+}
+function saveResume(item, id) {
+  try {
+    const m = resumeMap();
+    if (id) m[item.key] = id; else delete m[item.key];
+    localStorage.setItem(UP_KEY, JSON.stringify(m));
+  } catch (e) { /* 沒有 localStorage 就只是不能跨重新整理續傳 */ }
+}
+
+function addFiles(files) {
+  for (const f of files) {
+    const key = `${f.name}|${f.size}|${f.lastModified}`;
+    if (up.items.some((i) => i.key === key && i.status !== 'done')) continue;
+    up.items.push({ file: f, key, status: 'ready', sent: 0, msg: '' });
+  }
+  renderUpload();
+}
+
+function renderUpload() {
+  const list = $('up-list');
+  list.innerHTML = '';
+  for (const item of up.items) {
+    const c = document.createElement('div');
+    c.className = 'card uf';
+    c.innerHTML = '<div class="ufhead"><span class="ufname"></span><span class="ufsize"></span></div>';
+    c.querySelector('.ufname').textContent = item.file.name;
+    c.querySelector('.ufsize').textContent = fmtSize(item.file.size);
+    if (!up.running && item.status !== 'done') {
+      const x = document.createElement('button');
+      x.className = 'ufx';
+      x.textContent = '×';
+      x.setAttribute('aria-label', `移除 ${item.file.name}`);
+      x.addEventListener('click', () => {
+        up.items = up.items.filter((i) => i !== item);
+        renderUpload();
+      });
+      c.querySelector('.ufhead').appendChild(x);
+    }
+    if (item.status === 'sending' || item.status === 'waiting') {
+      const t = document.createElement('div');
+      t.className = 'bar-track';
+      t.innerHTML = '<div class="bar-fill"></div>';
+      t.firstChild.style.width = `${Math.max(2, (item.sent / item.file.size) * 100)}%`;
+      c.appendChild(t);
+    }
+    const msg = item.msg || (item.status === 'sending'
+      ? `上傳中 ${Math.floor((item.sent / item.file.size) * 100)}%` : '');
+    if (msg) {
+      const m = document.createElement('div');
+      m.className = 'ufmsg' + (item.status === 'failed' ? ' err' : item.status === 'done' ? ' ok' : '');
+      m.textContent = msg;
+      c.appendChild(m);
+    }
+    list.appendChild(c);
+  }
+  const pending = up.items.filter((i) => i.status === 'ready' || i.status === 'failed');
+  const startBtn = $('up-start');
+  startBtn.disabled = up.running || !pending.length;
+  startBtn.textContent = up.running ? '上傳中…'
+    : pending.length > 1 ? `開始上傳 ${pending.length} 個檔案` : '開始上傳';
+  startBtn.hidden = !up.running && !pending.length && up.items.length > 0;
+  $('up-tip').hidden = !up.running;
+  $('up-form').hidden = up.running || (!pending.length && up.items.length > 0);
+  $('up-done').hidden = up.running || !up.items.length
+    || !up.items.every((i) => i.status === 'done');
+}
+
+function updateUploadForm() {
+  $('up-speakers-field').hidden = $('up-course').value !== 'meeting';
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 等到畫面回來、網路通了再繼續
+async function waitForResume(item, wait) {
+  item.status = 'waiting';
+  item.msg = document.visibilityState === 'hidden'
+    ? '暫停中，回到這個畫面會自動接著傳'
+    : '連線中斷，恢復後會自動接著傳';
+  renderUpload();
+  await sleep(wait);
+  while (document.visibilityState === 'hidden' && !up.cancelled) await sleep(500);
+  item.status = 'sending';
+  item.msg = '';
+}
+
+async function uploadOne(item, opts) {
+  const f = item.file;
+  item.status = 'sending';
+  item.msg = '';
+  item.sent = 0;
+  renderUpload();
+
+  // 重新整理或 Safari 把分頁回收之後，選同一個檔要能接著傳
+  let uid = resumeMap()[item.key] || null;
+  if (uid) {
+    try {
+      item.sent = (await fetchJson(`/api/uploads/${uid}`)).received;
+    } catch (e) { uid = null; item.sent = 0; }
+  }
+  if (!uid) {
+    const made = await postJson('/api/uploads', {
+      filename: f.name, size: f.size, course_id: opts.course,
+      speakers: opts.speakers, terms: opts.terms,
+      recorded_at: f.lastModified ? new Date(f.lastModified).toISOString() : '',
+    });
+    uid = made.id;
+    saveResume(item, uid);
+  }
+
+  let wait = 1000;
+  while (item.sent < f.size) {
+    if (up.cancelled) throw new Error('已取消');
+    try {
+      const res = await fetch(`/api/uploads/${uid}?offset=${item.sent}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: f.slice(item.sent, item.sent + CHUNK_BYTES),
+      });
+      if (res.status >= 400 && res.status < 500) {
+        const j = await res.json().catch(() => ({}));
+        saveResume(item, null);
+        throw Object.assign(new Error(j.detail || `HTTP ${res.status}`), { fatal: true });
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      item.sent = (await res.json()).received;
+      wait = 1000;
+      renderUpload();
+    } catch (e) {
+      if (e.fatal) throw e;
+      await waitForResume(item, wait);
+      wait = Math.min(wait * 2, 8000);
+      // 斷線那塊可能只收了一半，問清楚再傳
+      try { item.sent = (await fetchJson(`/api/uploads/${uid}`)).received; } catch (e2) { /* 下一輪再試 */ }
+      renderUpload();
+    }
+  }
+  await postJson(`/api/uploads/${uid}/complete`);
+  saveResume(item, null);
+  item.status = 'done';
+  item.msg = '已上傳，等待轉文字';
+  renderUpload();
+}
+
+async function startUpload() {
+  if (up.running) return;
+  const opts = {
+    course: $('up-course').value,
+    speakers: Number($('up-speakers').value) || 0,
+    terms: $('up-terms').value,
+  };
+  try { localStorage.setItem('nobook.upCourse', opts.course); } catch (e) { /* 不影響上傳 */ }
+  up.running = true;
+  up.cancelled = false;
+  acquireWakeLock(true);
+  for (const item of up.items) {
+    if (item.status !== 'ready' && item.status !== 'failed') continue;
+    try {
+      await uploadOne(item, opts);
+    } catch (e) {
+      item.status = 'failed';
+      item.msg = '上傳失敗：' + e.message;
+    }
+  }
+  up.running = false;
+  if (state.wakeLock && !state.running) { state.wakeLock.release(); state.wakeLock = null; }
+  renderUpload();
+}
+
+async function loadUploadCourses() {
+  try {
+    const list = await (await fetch('/api/courses')).json();
+    const sel = $('up-course');
+    const meeting = list.filter((c) => c.id === 'meeting');
+    const rest = list.filter((c) => c.id !== 'meeting');
+    sel.innerHTML = '';
+    for (const c of [...meeting, ...rest]) sel.add(new Option(c.name, c.id));
+    let last = null;
+    try { last = localStorage.getItem('nobook.upCourse'); } catch (e) { /* 用預設 */ }
+    if (last && list.some((c) => c.id === last)) sel.value = last;
+    updateUploadForm();
+  } catch (e) { toast('連不上伺服器'); }
+}
+
+function openUpload() {
+  if (!up.running && up.items.length && up.items.every((i) => i.status === 'done')) up.items = [];
+  el.upload.classList.add('show');
+  $('up-file').value = '';
+  renderUpload();
+  loadUploadCourses();
+}
+
+async function closeUpload() {
+  if (up.running && !await ask({
+    title: '還在上傳，要離開嗎？',
+    message: '離開這個畫面不會中斷上傳，但請不要關閉 App。',
+    ok: '離開', cancel: '留在這裡',
+  })) return;
+  el.upload.classList.remove('show');
+  renderRecent();
+}
+
+$('open-upload').addEventListener('click', openUpload);
+$('upload-close').addEventListener('click', closeUpload);
+$('up-done-home').addEventListener('click', () => {
+  up.items = [];
+  el.upload.classList.remove('show');
+  renderRecent();
 });
+$('up-file').addEventListener('change', (e) => { addFiles(e.target.files); e.target.value = ''; });
+$('up-course').addEventListener('change', updateUploadForm);
+$('up-start').addEventListener('click', startUpload);
+{
+  const drop = $('drop');
+  for (const ev of ['dragenter', 'dragover']) {
+    drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); });
+  }
+  for (const ev of ['dragleave', 'drop']) {
+    drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); });
+  }
+  drop.addEventListener('drop', (e) => { if (e.dataTransfer) addFiles(e.dataTransfer.files); });
+}
+// 非 iPhone 不用看語音備忘錄的說明
+if (!/iPhone|iPad|iPod/.test(navigator.userAgent)
+    && !(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+  $('ios-howto').hidden = true;
+}
+
+// ── 現場錄音入口 ──────────────────────────────────────────────────────
+$('open-live').addEventListener('click', () => {
+  const noMic = !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia;
+  const err = $('mic-error');
+  err.hidden = !noMic;
+  err.textContent = noMic
+    ? '這個網址不能使用麥克風。請改用 https 開頭的網址（Tailscale 提供的那個），上傳錄音檔則不受影響。'
+    : '';
+  el.start.disabled = noMic || !el.courseSelect.value;
+  $('live-setup').classList.add('show');
+});
+$('live-close').addEventListener('click', () => $('live-setup').classList.remove('show'));
+$('note-toggle').addEventListener('click', () => {
+  const on = el.note.classList.toggle('show');
+  if (on) el.note.focus();
+});
+$('select-start').addEventListener('click', () => {
+  if (state.selecting) exitSelect(); else startSelect();
+});
+$('select-delete').addEventListener('click', deleteSelected);
+{
+  let timer = null;
+  $('history-search').addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(renderHistory, 200);
+  });
+}
 
 // ── 啟動 ──────────────────────────────────────────────────────────────
 async function loadCourses() {
@@ -1484,25 +2120,42 @@ async function loadCourses() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const list = await r.json();
     if (!list.length) throw new Error('伺服器沒有回報任何課程');
-    el.courseSelect.innerHTML = list
-      .map((c) => `<option value="${c.id}">${c.name}${c.instructor ? ' — ' + c.instructor : ''}</option>`)
-      .join('');
-    state.courseId = list[0].id;
+    el.courseSelect.innerHTML = '';
+    for (const c of list) {
+      el.courseSelect.add(new Option(c.instructor ? `${c.name} — ${c.instructor}` : c.name, c.id));
+    }
+    let last = null;
+    try { last = localStorage.getItem('nobook.liveCourse'); } catch (e) { /* 用預設 */ }
+    if (last && list.some((c) => c.id === last)) el.courseSelect.value = last;
+    state.courseId = el.courseSelect.value;
     el.start.disabled = false;
     $('load-error').textContent = '';
+    $('conn-error').hidden = true;
   } catch (e) {
     el.courseSelect.innerHTML = '<option value="">（讀不到課程）</option>';
     el.start.disabled = true;
+    $('conn-error').hidden = false;
     $('load-error').textContent =
-      `連不上伺服器（${e.message}）。確認筆電上的服務有啟動、Tailscale 有連線，然後重新整理。`;
+      '請確認手機的 Tailscale App 已開啟連線，以及伺服器那台電腦開著。';
   }
 }
 
 $('retry-load').addEventListener('click', () => {
   $('load-error').textContent = '重新連線中…';
   loadCourses();
+  renderRecent();
 });
-el.courseSelect.addEventListener('change', (e) => { state.courseId = e.target.value; });
+el.courseSelect.addEventListener('change', (e) => {
+  state.courseId = e.target.value;
+  try { localStorage.setItem('nobook.liveCourse', e.target.value); } catch (err) { /* 不影響錄音 */ }
+});
+
+function micHelp(e) {
+  if (e && e.name === 'NotAllowedError') {
+    return '瀏覽器沒有麥克風權限。iPhone 請到「設定 → Safari → 麥克風」改成允許，再回來重新開始。';
+  }
+  return '這台裝置目前無法錄音（' + (e && e.message) + '）。可以先用手機內建的錄音 App 錄好再上傳。';
+}
 
 el.start.addEventListener('click', async () => {
   el.start.disabled = true;
@@ -1510,8 +2163,8 @@ el.start.addEventListener('click', async () => {
     await startAudio();
   } catch (e) {
     el.start.disabled = false;
-    alert('無法取得麥克風：' + e.message
-      + '\n\n提示：getUserMedia 只在 HTTPS 下可用，請走 Tailscale Serve 的網址。');
+    $('mic-error').textContent = micHelp(e);
+    $('mic-error').hidden = false;
     return;
   }
   await acquireWakeLock();
@@ -1520,11 +2173,13 @@ el.start.addEventListener('click', async () => {
   el.course.textContent = el.courseSelect.selectedOptions[0]
     ? el.courseSelect.selectedOptions[0].textContent : state.courseId;
   el.overlay.classList.add('hide');
+  $('live-setup').classList.remove('show');
+  setLight('warn');
   connect();
 });
 
 window.addEventListener('beforeunload', (e) => {
-  if (state.running && !state.ended) { e.preventDefault(); e.returnValue = ''; }
+  if ((state.running && !state.ended) || up.running) { e.preventDefault(); e.returnValue = ''; }
 });
 
 if ('serviceWorker' in navigator) {
@@ -1539,10 +2194,11 @@ if ('serviceWorker' in navigator) {
         // 錄音中絕對不能自動重載。實測在課堂中途更新版本，平板會直接
         // 重新整理，那堂課就變成孤兒——伺服器端還活著，但前端認不回去。
         // 等這堂結束再換版，課比版本新舊重要。
-        if (state.running && !state.ended) {
-          toast('有新版本，這堂課結束後會自動更新', 5000);
+        const busy = () => (state.running && !state.ended) || up.running;
+        if (busy()) {
+          toast('有新版本，目前的工作完成後會自動更新', 5000);
           const wait = setInterval(() => {
-            if (state.running && !state.ended) return;
+            if (busy()) return;
             clearInterval(wait);
             location.reload();
           }, 5000);
@@ -1557,6 +2213,7 @@ if ('serviceWorker' in navigator) {
 }
 
 loadCourses();
+renderRecent();
 
 // 頁面重載後把剛才那堂接回來。沒有這段的話，重載一次就等於把課丟了：
 // 伺服器端 session 還在重連佇列裡，但前端不知道自己剛剛在錄哪一堂。
@@ -1569,8 +2226,11 @@ loadCourses();
     const secs = d.session.duration_s
       || (d.segments.length ? d.segments[d.segments.length - 1].end : 0);
     const name = d.session.note || d.session.course_id;
-    if (!confirm(`剛才那堂「${name}」還在錄（已 ${Math.round(secs / 60)} 分鐘），要接回去繼續嗎？
-選取消的話它會留在歷史紀錄裡，之後可以再收尾。`)) return;
+    if (!await ask({
+      title: '要繼續剛才的錄音嗎？',
+      message: `「${name}」已錄 ${Math.round(secs / 60)} 分鐘。選「先不要」的話它會留在紀錄裡。`,
+      ok: '繼續錄音', cancel: '先不要',
+    })) return;
     resumeSession(d);
   } catch (e) { /* 接不回去就算了，資料還在資料庫裡 */ }
 })();

@@ -682,6 +682,44 @@ def test_postprocess(gate):
     gate.check(not is_foreign_guess("這個 loss 很高", -0.9), "含中文的句子不算外語幻覺")
 
 
+def test_uploads(gate):
+    from server import meeting, uploads
+    gl, fix = meeting.parse_terms("負載卸載、王小明，深層式=生成式")
+    gate.check(gl == ["負載卸載", "王小明", "生成式"] and fix == {"深層式": "生成式"},
+               "上傳時填的術語拆成詞表與錯字對照")
+    rows = [dict(start=0.0, end=1.0, speaker=1, text="甲", avg_logprob=-0.2),
+            dict(start=1.5, end=2.0, speaker=1, text="乙", avg_logprob=-0.2),
+            dict(start=2.0, end=3.0, speaker=2, text="丙", avg_logprob=-0.2)]
+    gate.check([r["text"] for r in meeting.merge_rows(rows)] == ["甲乙", "丙"],
+               "同一人的相鄰片段併成一行")
+
+    async def scenario(tmp):
+        uploads.UPLOAD_DIR = Path(tmp)
+        async def chunks(*parts):
+            for p in parts:
+                yield p
+        made = uploads.create("語音備忘錄.m4a", 6, "meeting", 3, "", "", "")
+        uid = made["id"]
+        gate.check(await uploads.write_chunk(uid, 0, chunks(b"abcd")) == 4, "分塊寫入")
+        # iPhone 鎖屏時請求斷掉，伺服器可能已收下一部分：從對齊點重傳要覆蓋掉重複的
+        gate.check(await uploads.write_chunk(uid, 2, chunks(b"cdef")) == 6
+                   and (Path(tmp) / (uid + ".part")).read_bytes() == b"abcdef",
+                   "斷線後從舊位置重傳不會多出重複資料")
+        gate.check(await uploads.write_chunk(uid, 99, chunks(b"x")) == 6,
+                   "位置超前時回報實際收到多少，不寫入")
+        uploads.discard(uid)
+        for bad, why in ((lambda: uploads.create("a.exe", 5, "meeting"), "不支援的格式"),
+                         (lambda: uploads.received("../../etc"), "路徑穿越的編號")):
+            try:
+                bad()
+                gate.check(False, why + "要被擋下")
+            except uploads.UploadError:
+                gate.check(True, why + "要被擋下")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(scenario(tmp))
+
+
 def test_term_fix(gate):
     from server.term_fix import TermFixer
     fixer = TermFixer([], corrections={"深層式": "生成式"})
@@ -791,6 +829,7 @@ def main() -> int:
     test_courses(gate)
     print("\n[ASR 後處理 §4.4]")
     test_postprocess(gate)
+    test_uploads(gate)
     test_term_fix(gate)
     test_diarize(gate)
     print("\n[OOM 偵測 §7.4]")

@@ -1,14 +1,16 @@
 {
-  "name": "課堂即時筆記",
-  "short_name": "課堂筆記",
-  "description": "課堂即時轉錄與筆記系統",
+  "name": "nobook",
+  "short_name": "nobook",
+  "description": "把錄音變成逐字稿和筆記",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#0f1216",
-  "theme_color": "#111418",
+  "background_color": "#f6f6f3",
+  "theme_color": "#f6f6f3",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" },
+    { "src": "icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
   ]
 }

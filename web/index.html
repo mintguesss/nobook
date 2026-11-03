@@ -3,481 +3,471 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#111418">
-<title>課堂筆記</title>
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f6f3">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14171b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="nobook">
+<title>nobook</title>
 <link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<!-- iOS 的主畫面圖示不吃 SVG -->
+<link rel="apple-touch-icon" href="icon-180.png">
 <style>
   :root {
-    --bg: #0f1216;
-    --panel: #171b21;
-    --panel-2: #1d222a;
-    --line: #2a3039;
-    --fg: #e8ecf1;
-    --fg-dim: #94a0ae;
-    --accent: #4da3ff;
-    --ok: #35c46b;
-    --warn: #e8b13a;
-    --bad: #e8574a;
-    --btn-h: 64px;
+    color-scheme: light dark;
+    --bg: #f6f6f3;
+    --panel: #ffffff;
+    --panel-2: #eeeeea;
+    --line: #dddcd6;
+    --fg: #1d2023;
+    --fg-dim: #63686e;
+    --accent: #0f6e6a;
+    --accent-fg: #ffffff;
+    --accent-soft: rgba(15, 110, 106, .11);
+    --ok: #1c8450;
+    --warn: #96650a;
+    --warn-soft: rgba(176, 121, 16, .12);
+    --bad: #bf3528;
+    --bad-soft: rgba(191, 53, 40, .1);
+    --shadow: 0 8px 26px rgba(30, 30, 25, .13);
+    --spk-1: #0f6e6a; --spk-2: #a4502c; --spk-3: #5a55b0;
+    --spk-4: #8a6a00; --spk-5: #a23d78; --spk-6: #2f6da8;
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171b;
+      --panel: #1c2026;
+      --panel-2: #262b32;
+      --line: #333942;
+      --fg: #e9ecef;
+      --fg-dim: #9aa3ad;
+      --accent: #58c2b8;
+      --accent-fg: #06201e;
+      --accent-soft: rgba(88, 194, 184, .14);
+      --ok: #5bc98b;
+      --warn: #e2b34f;
+      --warn-soft: rgba(226, 179, 79, .13);
+      --bad: #ef7d70;
+      --bad-soft: rgba(239, 125, 112, .13);
+      --shadow: 0 10px 30px rgba(0, 0, 0, .45);
+      --spk-1: #58c2b8; --spk-2: #e8996f; --spk-3: #a7a3f0;
+      --spk-4: #d9b84f; --spk-5: #e58cc0; --spk-6: #7fb4e6;
+    }
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
     margin: 0; height: 100%; overflow: hidden;
     background: var(--bg); color: var(--fg);
-    font: 16px/1.6 "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    font: 16px/1.6 -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+    -webkit-text-size-adjust: 100%;
   }
-  body { display: flex; flex-direction: column; }
-
-  /* 頂部狀態列（規格 §8.1-1）------------------------------------- */
-  header {
-    display: flex; align-items: center; gap: 12px;
-    padding: 10px 14px; background: var(--panel);
-    border-bottom: 1px solid var(--line); flex: none;
-    padding-top: calc(10px + env(safe-area-inset-top));
+  /* iOS 的 100% 高度不扣網址列 */
+  body { display: flex; flex-direction: column; height: 100dvh; }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button {
+    cursor: pointer; touch-action: manipulation;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
   }
-  #home {
-    flex: none; background: var(--panel-2); border: 1px solid var(--line);
-    color: var(--accent); font-size: 14px; font-weight: 600;
-    padding: 8px 12px; border-radius: 8px; cursor: pointer;
+  button:disabled { opacity: .5; cursor: default; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* 字級低於 16px 的輸入框，iOS 一點下去整頁會自動放大 */
+  input, select, textarea { font-size: 16px; }
+  [hidden] { display: none !important; }
+
+  .btn {
+    min-height: 44px; padding: 9px 16px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--panel); font-weight: 500;
   }
-  #home:active { background: var(--line); }
-  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--bad); flex: none; }
-  .dot.ok { background: var(--ok); }
-  .dot.warn { background: var(--warn); animation: pulse 1s infinite; }
-  @keyframes pulse { 50% { opacity: .35; } }
-  #elapsed { font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 600; }
-  .meta { color: var(--fg-dim); font-size: 13px; margin-left: auto; text-align: right; }
-  #course { font-weight: 600; color: var(--fg); }
+  .btn:active { background: var(--panel-2); }
+  .btn.primary {
+    background: var(--accent); border-color: var(--accent); color: var(--accent-fg);
+    font-weight: 700;
+  }
+  .btn.primary:active { opacity: .85; background: var(--accent); }
+  .btn.danger { color: var(--bad); }
+  .btn.big { min-height: 54px; font-size: 17px; width: 100%; }
+  .link {
+    background: none; border: none; color: var(--accent); font-weight: 500;
+    padding: 8px 6px; min-height: 40px;
+  }
+  .field { display: flex; flex-direction: column; gap: 6px; margin: 0 0 18px; }
+  .field > label, .field > .flabel { font-weight: 600; font-size: 15px; }
+  .field .hint, .hint { color: var(--fg-dim); font-size: 13px; line-height: 1.55; margin: 0; }
+  select, input[type=text], input[type=search], textarea {
+    width: 100%; min-height: 46px; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--panel);
+  }
+  textarea { min-height: 84px; resize: vertical; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 16px;
+  }
+  .card.warn { background: var(--warn-soft); border-color: transparent; }
+  .card.bad { background: var(--bad-soft); border-color: transparent; }
+  .card h3 { margin: 0 0 4px; font-size: 16px; }
+  .card p { margin: 0 0 10px; font-size: 14px; }
+  .card p:last-child { margin-bottom: 0; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btns > .btn { flex: 1 1 auto; }
+  .spin {
+    display: inline-block; width: 13px; height: 13px; border-radius: 50%;
+    border: 2px solid var(--fg-dim); border-top-color: transparent;
+    animation: spin .8s linear infinite; vertical-align: -1px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .bar-track { height: 7px; border-radius: 99px; background: var(--panel-2); overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .3s; }
 
-  /* 主體 ---------------------------------------------------------- */
-  main { flex: 1; display: flex; min-height: 0; flex-direction: column; }
-  /* 分兩欄的條件是「夠寬」，不是 orientation。分割螢幕的視窗常常是
-     矮而寬，orientation 照樣回報 landscape，於是側欄被擠進 300px 裡，
-     兩邊都不能看。用寬度判斷，窄的時候就乖乖上下疊。 */
-  @media (min-width: 720px) { main { flex-direction: row; } }
-
-  #transcript-wrap { position: relative; flex: 1 1 auto; min-height: 0; }
-  #transcript {
-    height: 100%; overflow-y: auto; padding: 14px 16px 24px;
+  /* 全頁面板 --------------------------------------------------------- */
+  .screen {
+    position: fixed; inset: 0; background: var(--bg);
+    display: none; flex-direction: column;
+  }
+  .screen.show { display: flex; }
+  .bar {
+    display: flex; align-items: center; gap: 8px; flex: none;
+    padding: calc(8px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 8px calc(14px + env(safe-area-inset-left));
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    font-weight: 600; min-height: 56px;
+  }
+  .bar .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .scroll {
+    flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
   }
-  .seg {
-    margin: 0 0 10px; animation: fade .35s ease-out;
-    display: flex; gap: 10px; align-items: baseline;
-  }
-  .seg .t {
-    color: var(--fg-dim); font-size: 12px; font-variant-numeric: tabular-nums;
-    flex: none; padding-top: 3px;
-  }
-  .seg.low .x { color: var(--fg-dim); }
-  .seg.gap .x { color: var(--warn); font-size: 13px; }
-  .seg.gap .t { color: var(--warn); }
-  .seg.flash .x { background: rgba(77,163,255,.18); border-radius: 4px; }
-  @keyframes fade { from { opacity: 0; transform: translateY(6px); } }
-
-  #to-latest {
-    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
-    background: var(--accent); color: #06121f; border: none; border-radius: 999px;
-    padding: 9px 18px; font-size: 14px; font-weight: 700; display: none;
-    box-shadow: 0 6px 18px rgba(0,0,0,.45); cursor: pointer;
-  }
-  #to-latest.show { display: block; }
-
-  /* 摘要側欄（規格 §8.1-4）---------------------------------------- */
-  /* 標頭的次要按鈕：跟「首頁」同形狀，但不搶視覺重量 */
-  .hbtn {
-    flex: none; background: none; border: 1px solid var(--line);
-    color: var(--fg-dim); font-size: 13px;
-    padding: 7px 11px; border-radius: 8px; cursor: pointer;
-  }
-  .hbtn:active { background: var(--panel-2); color: var(--fg); }
-  .secsum { margin: 6px 0 10px; opacity: .85; line-height: 1.55; }
-  .sechead {
-    font-weight: 600; font-size: 13px; margin: 10px 0 2px;
-    opacity: .9; letter-spacing: .02em;
-  }
-  .secbody ul { margin: 2px 0 0; }
-  .batch { border: 1px solid #2a2f3a; border-radius: 10px; margin: 8px 6px; }
-  .batch > summary {
-    display: flex; gap: 10px; align-items: baseline; cursor: pointer;
-    padding: 9px 12px; font-weight: 600; list-style: none;
-  }
-  .batch > summary::-webkit-details-marker { display: none; }
-  .batch > summary::before { content: '▸'; opacity: .6; }
-  .batch[open] > summary::before { content: '▾'; }
-  .batch .bmeta { font-weight: 400; font-size: 12px; opacity: .6; }
-  .batch .bbody { padding: 0 6px 6px; }
-  .ptag {
-    margin-left: auto; flex: none; font-size: 11px; padding: 2px 7px;
-    border-radius: 999px; background: var(--panel-2); color: var(--accent);
-    border: 1px solid var(--line);
+  .wrap {
+    width: 100%; max-width: 720px; margin: 0 auto;
+    padding: 18px calc(16px + env(safe-area-inset-right)) 0 calc(16px + env(safe-area-inset-left));
   }
 
-  .plist { list-style: none; margin: 4px 0 0; padding: 0; }
-  .plist li { display: flex; align-items: baseline; gap: 10px; padding: 3px 0; }
-  .pjump {
-    flex: none; min-width: 46px; padding: 2px 8px; border-radius: 6px;
-    background: var(--panel-2); border: 1px solid var(--line);
-    color: var(--accent); font-size: 12px; cursor: pointer;
+  /* 首頁 ------------------------------------------------------------- */
+  #overlay { z-index: 30; display: flex; padding-top: env(safe-area-inset-top); }
+  #overlay.hide { display: none; }
+  .brand { display: flex; align-items: center; gap: 11px; margin: 10px 0 20px; }
+  .brand img { width: 40px; height: 40px; border-radius: 10px; }
+  .brand h1 { margin: 0; font-size: 21px; line-height: 1.2; }
+  .brand p { margin: 0; color: var(--fg-dim); font-size: 13px; }
+  .actions { display: grid; gap: 10px; grid-template-columns: 1fr; margin-bottom: 26px; }
+  @media (min-width: 560px) { .actions { grid-template-columns: 1fr 1fr; } }
+  .action {
+    display: flex; align-items: center; gap: 14px; text-align: left; width: 100%;
+    padding: 16px; border-radius: var(--radius); min-height: 88px;
+    border: 1px solid var(--line); background: var(--panel);
   }
-  .plist .pt { color: var(--fg-dim); font-size: 12px; }
+  .action:active { background: var(--panel-2); }
+  .action.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .action.primary:active { opacity: .88; background: var(--accent); }
+  .action svg { width: 30px; height: 30px; flex: none; }
+  .action b { display: block; font-size: 18px; line-height: 1.3; }
+  .action small { display: block; font-size: 13px; opacity: .8; line-height: 1.4; margin-top: 2px; }
+  .sechead-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .sechead-row h2 { margin: 0; font-size: 15px; color: var(--fg-dim); font-weight: 600; }
+  #load-error:empty { display: none; }
+  #conn-error { margin-bottom: 18px; }
 
-  /* 課程資料夾：一門課上十八週，平鋪的清單找不到東西 */
-  .cfold { border-bottom: 1px solid var(--line); }
-  .cfold > summary {
-    display: flex; align-items: baseline; gap: 10px; cursor: pointer;
-    padding: 14px 16px; list-style: none; font-weight: 600;
+  /* 紀錄清單 --------------------------------------------------------- */
+  .rows { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .rows:empty { display: none; }
+  .empty-note { color: var(--fg-dim); font-size: 14px; text-align: center; padding: 26px 12px; }
+  .hitem + .hitem { border-top: 1px solid var(--line); }
+  .hrow {
+    display: flex; align-items: center; gap: 12px; width: 100%; min-height: 62px;
+    padding: 10px 14px; background: none; border: none; text-align: left;
   }
-  .cfold > summary::-webkit-details-marker { display: none; }
-  .cfold > summary::before {
-    content: '▸'; color: var(--fg-dim); font-weight: 400;
-    transition: transform .12s;
+  .hrow:active { background: var(--panel-2); }
+  .hmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .hname { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hmeta { color: var(--fg-dim); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hbadge {
+    flex: none; font-size: 12px; padding: 2px 9px; border-radius: 99px;
+    background: var(--panel-2); color: var(--fg-dim); font-weight: 500;
   }
-  .cfold[open] > summary::before { content: '▾'; }
-  .cfold > summary:active { background: var(--panel-2); }
-  .cfold .cmeta {
-    margin-left: auto; font-size: 12px; color: var(--fg-dim); font-weight: 400;
-  }
-  .cfold .hitem { border-bottom: none; background: var(--panel); }
-  .cfold .hitem + .hitem { border-top: 1px solid var(--line); }
-  .cfold .hrow { padding-left: 30px; }
-  .cfold .hcourse { font-weight: 500; font-size: 14px; }
-
-  /* 多選：長按進入，左邊長出圓圈。沒進選取模式時圓圈完全不佔空間，
-     不然整個清單會為了一個平常用不到的控制項往右縮排。 */
+  .hbadge.busy { background: var(--accent-soft); color: var(--accent); }
+  .hbadge.todo { background: var(--warn-soft); color: var(--warn); }
+  .hbadge.fail { background: var(--bad-soft); color: var(--bad); }
+  .hprog { height: 3px; background: var(--panel-2); margin-top: 5px; border-radius: 9px; overflow: hidden; }
+  .hprog i { display: block; height: 100%; background: var(--accent); }
   .hpick { display: none; flex: none; }
   #history.selecting .hpick {
-    display: block; width: 20px; height: 20px; border-radius: 50%;
-    border: 2px solid var(--fg-dim); margin-right: 2px;
+    display: block; width: 22px; height: 22px; border-radius: 50%;
+    border: 2px solid var(--fg-dim);
   }
   #history.selecting .hitem.picked .hpick {
     border-color: var(--accent); background: var(--accent);
     box-shadow: inset 0 0 0 3px var(--panel);
   }
-  #history.selecting .hitem.picked { background: rgba(77, 163, 255, .10); }
-  #history.selecting .hdel { display: none; }
-  .hnote { color: var(--accent); font-weight: 500; }
-  .noterow { display: flex; gap: 8px; align-items: center; }
-  .noterow input {
-    flex: 1; min-width: 0; padding: 9px 11px; border-radius: 8px;
-    background: var(--panel-2); border: 1px solid var(--line);
-    color: var(--fg); font: inherit; font-size: 14px;
+  #history.selecting .hitem.picked { background: var(--accent-soft); }
+  .cfold { margin-bottom: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .cfold > summary {
+    display: flex; align-items: center; gap: 9px; cursor: pointer; min-height: 52px;
+    padding: 10px 14px; list-style: none; font-weight: 600;
   }
-  .noterow input:focus { outline: none; border-color: var(--accent); }
-
+  .cfold > summary::-webkit-details-marker { display: none; }
+  .cfold > summary::before { content: '›'; color: var(--fg-dim); font-size: 19px; line-height: 1; transition: transform .12s; }
+  .cfold[open] > summary::before { transform: rotate(90deg); }
+  .cfold .cmeta { margin-left: auto; font-size: 13px; color: var(--fg-dim); font-weight: 400; }
+  .cfold .hitem { border-top: 1px solid var(--line); }
+  #usage { color: var(--fg-dim); font-size: 12px; margin: 14px 2px 0; }
+  #usage:empty { display: none; }
+  #build { font-size: 11px; color: var(--fg-dim); font-weight: 400; }
   #select-bar {
-    position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
-    display: none; align-items: center; gap: 12px;
-    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    flex: none; display: none; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
     background: var(--panel); border-top: 1px solid var(--line);
   }
   #select-bar.show { display: flex; }
-  #select-why { color: var(--warn); font-size: 12px; }
-  #select-bar .spacer { margin-left: auto; }
-  #select-merge {
-    background: var(--accent); color: #06121f; border: none;
-    padding: 10px 20px; border-radius: 8px; font-weight: 700; cursor: pointer;
-  }
-  #select-merge:disabled { background: var(--panel-2); color: var(--fg-dim); }
+  #select-why { color: var(--warn); font-size: 12px; flex-basis: 100%; }
+  #select-why:empty { display: none; }
+  #select-bar .spacer { margin-right: auto; }
 
-  /* 合併區塊：沿用歷史列的視覺語言（同樣的列高、同樣的分隔線），
-     只用左側一條強調色標示它是動作區，不要做成另一種卡片。 */
-  .mergebox { border-bottom: 1px solid var(--line); }
-  .mergehead {
-    font-size: 12px; color: var(--fg-dim); letter-spacing: .02em;
-    padding: 14px 16px 6px;
+  /* 上傳 ------------------------------------------------------------- */
+  #upload { z-index: 35; }
+  .drop {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    text-align: center; min-height: 128px; padding: 18px; cursor: pointer;
+    border: 2px dashed var(--line); border-radius: var(--radius); background: var(--panel);
   }
-  .mergebox .hitem {
-    border-bottom: none; border-left: 2px solid var(--accent);
+  .drop:active, .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  .drop b { font-size: 17px; color: var(--accent); }
+  .drop small { color: var(--fg-dim); font-size: 13px; }
+  .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .howto { margin: 10px 0 20px; font-size: 13px; color: var(--fg-dim); }
+  .howto summary { cursor: pointer; color: var(--accent); font-weight: 500; min-height: 34px; display: flex; align-items: center; }
+  .howto ol { margin: 4px 0 0; padding-left: 20px; line-height: 1.7; }
+  .uflist { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+  .uf { padding: 11px 13px; }
+  .uf .ufhead { display: flex; align-items: center; gap: 10px; }
+  .uf .ufname { flex: 1; min-width: 0; font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .uf .ufsize { color: var(--fg-dim); font-size: 12px; flex: none; }
+  .uf .ufx { background: none; border: none; color: var(--fg-dim); padding: 2px 6px; font-size: 18px; line-height: 1; min-height: 30px; min-width: 30px; }
+  .uf .ufmsg { font-size: 13px; color: var(--fg-dim); margin-top: 3px; }
+  .uf .ufmsg.err { color: var(--bad); }
+  .uf .ufmsg.ok { color: var(--ok); }
+  .uf .bar-track { margin-top: 7px; }
+  .adv { margin-bottom: 18px; }
+  .adv > summary { cursor: pointer; color: var(--accent); font-weight: 500; font-size: 15px; min-height: 40px; display: flex; align-items: center; }
+  .adv .field { margin: 6px 0 0; }
+
+  /* 現場錄音開始前 --------------------------------------------------- */
+  #live-setup { z-index: 35; }
+
+  /* 詳細頁 ----------------------------------------------------------- */
+  #detail { z-index: 46; }
+  .d-name {
+    width: 100%; font-size: 19px !important; font-weight: 700; min-height: 44px;
+    border: 1px solid transparent !important; background: transparent !important;
+    padding: 4px 6px !important; margin-left: -6px; border-radius: 8px;
   }
-  .mergebox .hmain {
-    flex: 1; min-width: 0; padding: 12px 16px; font-size: 14px;
-    display: flex; flex-direction: column; gap: 3px;
+  .d-name:hover, .d-name:focus { border-color: var(--line) !important; background: var(--panel) !important; }
+  .d-meta { color: var(--fg-dim); font-size: 13px; margin: 0 0 14px; }
+  .d-block { margin-bottom: 14px; }
+  .player {
+    position: sticky; top: 0; z-index: 2; padding: 6px 0 8px; background: var(--bg);
   }
-  .mergebox .mtitle { font-weight: 600; }
-  .mergebox .mmeta { color: var(--fg-dim); font-size: 12px; }
-  .hmerge {
-    flex: none; padding: 0 18px; background: none; border: none;
-    border-left: 1px solid var(--line);
-    color: var(--accent); font-size: 14px; font-weight: 600; cursor: pointer;
+  .player audio { width: 100%; height: 44px; display: block; }
+  .tabs {
+    display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--line);
+    margin-bottom: 14px; scrollbar-width: none;
   }
-  .hmerge:active { background: rgba(77,163,255,.12); }
-  .hmerge:disabled { color: var(--fg-dim); font-weight: 400; }
-  /* 版本號：改版送不送得到手機上，這是唯一看得出來的地方 */
-  #build { margin-left: auto; font-size: 11px; color: var(--fg-dim); }
-  /* 即時整理的標頭：右上一個縮小符號，按了整區縮成這一行 */
-  #sumbar {
-    display: flex; align-items: center; gap: 10px;
-    padding: 8px 14px 4px; font-size: 12px; color: var(--fg-dim);
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    flex: none; min-height: 44px; padding: 8px 14px; background: none; border: none;
+    border-bottom: 2.5px solid transparent; color: var(--fg-dim); font-weight: 600;
+    margin-bottom: -1px; font-size: 15px;
   }
-  #sum-toggle {
-    margin-left: auto; width: 26px; height: 26px; line-height: 1;
-    display: flex; align-items: center; justify-content: center;
-    background: none; border: 1px solid var(--line); border-radius: 7px;
-    color: var(--fg-dim); font-size: 13px; cursor: pointer;
-    transition: transform .12s;
+  .tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab .n { font-weight: 400; font-size: 12px; margin-left: 3px; }
+  .panel { display: none; }
+  .panel.on { display: block; }
+  .tools { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .chip {
+    min-height: 36px; padding: 4px 12px; border-radius: 99px; font-size: 14px; font-weight: 600;
+    border: 1px solid var(--line); background: var(--panel);
   }
-  #sum-toggle:active { background: var(--panel-2); color: var(--fg); }
-  #sumwrap.folded #sum-toggle { transform: rotate(-90deg); }
-  #sumwrap.folded #summaries { display: none; }
-  /* 尺寸要下在 #sumwrap 上。下在 #summaries 上的話，38% 算的是
-     #sumwrap 的寬度而不是主區的，而且一收合 #sumwrap 就塌成一條窄柱。 */
-  #sumwrap { display: flex; flex-direction: column; min-height: 0; flex: none; }
-  #summaries {
-    flex: 1 1 auto; max-height: 38vh; overflow-y: auto;
-    background: var(--panel); border-top: 1px solid var(--line); padding: 6px 0;
+  .chip::after { content: ' ✎'; font-weight: 400; opacity: .55; font-size: 12px; }
+  .lines { line-height: 1.75; }
+  .ln { display: flex; gap: 10px; padding: 6px 0; align-items: baseline; }
+  .ln .t {
+    flex: none; background: none; border: none; padding: 0 2px; font-size: 12px;
+    font-variant-numeric: tabular-nums; color: var(--fg-dim); min-width: 56px; text-align: left;
+    min-height: 26px;
   }
-  @media (min-width: 720px) {
-    #sumwrap {
-      width: 38%; max-width: 460px; min-width: 280px;
-      background: var(--panel); border-left: 1px solid var(--line);
-    }
-    /* 收合後只留標頭那一條，寬度跟著縮回去，逐字稿吃滿剩下的空間 */
-    #sumwrap.folded {
-      width: auto; min-width: 0; max-width: none;
-    }
-    #summaries { max-height: none; border-top: none; }
-  }
-  #sumwrap.folded #sumcount { display: none; }
-  #sumwrap.folded #sumbar { padding: 8px 10px; }
-  #summaries:empty::after {
-    content: "按下方按鈕標記重點，摘要會出現在這裡";
-    display: block; padding: 18px 16px; color: var(--fg-dim); font-size: 14px;
-  }
+  .ln .t.can { color: var(--accent); text-decoration: underline dotted; text-underline-offset: 3px; }
+  .ln .b { flex: 1; min-width: 0; }
+  .ln .who { font-weight: 700; font-size: 13px; display: block; line-height: 1.5; }
+  .ln.low .x { color: var(--fg-dim); }
+  .ln mark { background: var(--warn-soft); color: inherit; border-radius: 3px; }
+  .spk-1 { color: var(--spk-1); } .spk-2 { color: var(--spk-2); } .spk-3 { color: var(--spk-3); }
+  .spk-4 { color: var(--spk-4); } .spk-5 { color: var(--spk-5); } .spk-6 { color: var(--spk-6); }
+  .seg-toggle { display: inline-flex; background: var(--panel-2); border-radius: 10px; padding: 3px; margin-bottom: 14px; }
+  .seg-toggle button { border: none; background: none; min-height: 36px; padding: 4px 14px; border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--fg-dim); }
+  .seg-toggle button.on { background: var(--panel); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.14); }
+  .md h1 { font-size: 19px; margin: 0 0 12px; }
+  .md h2 { font-size: 16px; margin: 20px 0 6px; color: var(--accent); }
+  .md h2.exam { color: var(--warn); }
+  .md h3 { font-size: 15px; margin: 14px 0 4px; }
+  .md ul { margin: 0 0 8px; padding-left: 20px; }
+  .md li { margin-bottom: 5px; }
+  .md p { margin: 0 0 8px; }
+  .dl-row { margin-top: 16px; }
+
+  /* 段落摘要（現場側欄與詳細頁共用）---------------------------------- */
+  .secsum { margin: 6px 0 10px; color: var(--fg-dim); line-height: 1.55; font-size: 14px; }
+  .sechead { font-weight: 600; font-size: 13px; margin: 10px 0 2px; }
   .sec { border-bottom: 1px solid var(--line); }
-  .sec > summary {
-    list-style: none; cursor: pointer; padding: 11px 16px;
-    display: flex; gap: 10px; align-items: baseline;
-  }
+  .sec > summary { list-style: none; cursor: pointer; padding: 11px 4px; display: flex; gap: 10px; align-items: baseline; }
   .sec > summary::-webkit-details-marker { display: none; }
-  .sec .ts {
-    color: var(--accent); font-size: 12px; font-variant-numeric: tabular-nums;
-    flex: none; text-decoration: underline dotted;
-  }
+  .sec .ts { color: var(--accent); font-size: 12px; font-variant-numeric: tabular-nums; flex: none; text-decoration: underline dotted; }
   .sec .title { font-weight: 600; font-size: 15px; }
-  .sec ul { margin: 0 0 12px; padding: 0 16px 0 40px; }
-  .sec li { font-size: 14px; color: #cfd7e0; margin-bottom: 5px; }
-  .sec .note {
-    margin: 0 16px 12px 40px; padding: 7px 11px; font-size: 13px;
-    background: var(--panel-2); border-left: 3px solid var(--warn); border-radius: 4px;
-  }
+  .sec .secbody { padding: 0 4px 10px; }
+  .sec ul { margin: 0 0 8px; padding-left: 20px; }
+  .sec li { font-size: 14px; margin-bottom: 5px; }
+  .sec .note { margin: 0 4px 12px; padding: 7px 11px; font-size: 13px; background: var(--warn-soft); border-radius: 6px; }
   .sec.pending .title { color: var(--fg-dim); }
-  .spin {
-    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
-    border: 2px solid var(--fg-dim); border-top-color: transparent;
-    animation: spin .8s linear infinite; vertical-align: -1px;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* 底部按鈕（規格 §8.1-3：盲按，至少 72px）---------------------- */
-  footer {
-    flex: none; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
-    background: var(--panel); border-top: 1px solid var(--line);
-    display: flex; flex-direction: column; gap: 8px;
-  }
-  #note {
-    display: none; width: 100%; padding: 11px 13px; font-size: 16px;
-    background: var(--panel-2); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 10px;
-  }
-  #note.show { display: block; }
-  #mark {
-    width: 100%; min-height: var(--btn-h); border: none; border-radius: 16px;
-    background: var(--accent); color: #06121f; font-size: 19px; font-weight: 800;
-    letter-spacing: 2px; cursor: pointer; touch-action: manipulation;
-    transition: transform .08s, background .15s;
-  }
-  #mark:active { transform: scale(.985); }
-  #mark:disabled { background: #39424e; color: var(--fg-dim); }
-  .row { display: flex; gap: 8px; }
-  .row button {
-    flex: 1; padding: 12px; font-size: 15px; border-radius: 10px;
-    border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
-    cursor: pointer;
-  }
-  .row button.danger { color: var(--bad); }
-  .row button.accent { color: var(--accent); font-weight: 600; }
-  .row button:disabled { opacity: .5; }
-
-  /* 手抄版筆記：使用者會照著抄在紙上，所以字要大、行距要鬆 */
-  #copy-view { position: fixed; inset: 0; background: var(--bg); z-index: 45;
-    display: none; flex-direction: column; }
-  #copy-view.show { display: flex; }
-  /* 夠寬的時候收成右側欄。整片蓋住的話就沒辦法一邊照著抄、一邊看
-     逐字稿還在跑什麼——而抄筆記的時候課還在上。窄視窗（分割螢幕）
-     維持全螢幕：硬分兩欄的話兩邊都讀不了。 */
-  @media (min-width: 720px) {
-    #copy-view.show {
-      inset: 0 0 0 auto; width: 52%; min-width: 360px;
-      border-left: 1px solid var(--line);
-      box-shadow: -10px 0 28px rgba(0, 0, 0, .45);
-    }
-  }
-  #copy-body { flex: 1; overflow-y: auto; padding: 18px 20px 28px; }
-  #copy-body h1 { font-size: 20px; margin: 0 0 16px; }
-  #copy-body h2 {
-    font-size: 17px; margin: 22px 0 8px; color: var(--accent);
-    border-bottom: 1px solid var(--line); padding-bottom: 5px;
-  }
-  #copy-body h2.exam { color: var(--warn); }
-  #copy-body ul { margin: 0; padding-left: 22px; }
-  #copy-body li { font-size: 17px; line-height: 1.85; margin-bottom: 9px; }
-  #copy-count { color: var(--fg-dim); font-size: 13px; font-weight: 400; }
-  .checkbox {
-    margin-top: 26px; padding: 14px 16px; border-radius: 10px;
-    background: rgba(232,177,58,.08); border: 1px solid rgba(232,177,58,.4);
-  }
-  .checkbox h2 { margin-top: 0 !important; border: none !important; font-size: 15px; }
-  .checkbox li { font-size: 14px !important; line-height: 1.7 !important; }
+  .sec.flash { background: var(--accent-soft); }
+  .ptag { margin-left: auto; flex: none; font-size: 11px; padding: 2px 7px; border-radius: 99px; background: var(--panel-2); color: var(--accent); }
+  .plist { list-style: none; margin: 4px 0 0; padding: 0; }
+  .plist li { display: flex; align-items: baseline; gap: 10px; padding: 3px 0; }
+  .pjump { flex: none; min-width: 46px; min-height: 32px; padding: 2px 8px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line); color: var(--accent); font-size: 12px; }
+  .plist .pt { color: var(--fg-dim); font-size: 12px; }
+  .batch { border: 1px solid var(--line); border-radius: 10px; margin: 8px; background: var(--panel); }
+  .batch > summary { display: flex; gap: 10px; align-items: baseline; cursor: pointer; padding: 9px 12px; font-weight: 600; list-style: none; }
+  .batch > summary::-webkit-details-marker { display: none; }
+  .batch > summary::before { content: '›'; color: var(--fg-dim); }
+  .batch[open] > summary::before { content: '⌄'; }
+  .batch .bmeta { font-weight: 400; font-size: 12px; color: var(--fg-dim); }
+  .batch .bbody { padding: 0 8px 6px; }
   .cnote { font-size: 13px; color: var(--fg-dim); margin: 10px 0 6px; }
   .cnote.dim { font-size: 12px; margin-top: 14px; line-height: 1.6; }
   .novel { color: var(--warn); font-size: 12px; }
 
-  /* 提示與遮罩 ---------------------------------------------------- */
+  /* 現場錄音畫面 ----------------------------------------------------- */
+  #live-head {
+    display: flex; align-items: center; gap: 10px; flex: none; background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    padding: calc(8px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 8px calc(12px + env(safe-area-inset-left));
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--fg-dim); flex: none; }
+  .dot.ok { background: var(--bad); animation: pulse 1.6s infinite; }
+  .dot.warn { background: var(--warn); animation: pulse .8s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  #elapsed { font-variant-numeric: tabular-nums; font-size: 19px; font-weight: 700; }
+  .meta { color: var(--fg-dim); font-size: 12px; margin-left: auto; text-align: right; line-height: 1.35; min-width: 0; }
+  #course { font-weight: 600; color: var(--fg); font-size: 14px; }
+  .hbtn { flex: none; background: none; border: 1px solid var(--line); font-size: 14px; min-height: 38px; padding: 4px 10px; border-radius: 9px; }
+  .hbtn:active { background: var(--panel-2); }
+  main { flex: 1; display: flex; min-height: 0; flex-direction: column; }
+  @media (min-width: 720px) { main { flex-direction: row; } }
+  #transcript-wrap { position: relative; flex: 1 1 auto; min-height: 0; }
+  #transcript { height: 100%; overflow-y: auto; padding: 14px 16px 24px; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  #transcript:empty::after {
+    content: "開始說話後，文字會出現在這裡（通常慢幾秒）"; color: var(--fg-dim); font-size: 14px;
+  }
+  .seg { margin: 0 0 10px; animation: fade .3s ease-out; display: flex; gap: 10px; align-items: baseline; }
+  .seg .t { color: var(--fg-dim); font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
+  .seg.low .x { color: var(--fg-dim); }
+  .seg.gap .x, .seg.gap .t { color: var(--warn); }
+  .seg.gap .x { font-size: 13px; }
+  .seg.flash .x { background: var(--accent-soft); border-radius: 4px; }
+  @keyframes fade { from { opacity: 0; transform: translateY(5px); } }
+  #to-latest {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    background: var(--accent); color: var(--accent-fg); border: none; border-radius: 99px;
+    min-height: 40px; padding: 7px 18px; font-size: 14px; font-weight: 700; display: none;
+    box-shadow: var(--shadow);
+  }
+  #to-latest.show { display: block; }
+  #sumbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px 4px; font-size: 12px; color: var(--fg-dim); }
+  #sum-toggle {
+    margin-left: auto; width: 34px; height: 34px; line-height: 1; display: flex;
+    align-items: center; justify-content: center; background: none; border: 1px solid var(--line);
+    border-radius: 8px; color: var(--fg-dim); font-size: 13px; transition: transform .12s;
+  }
+  #sumwrap.folded #sum-toggle { transform: rotate(-90deg); }
+  #sumwrap.folded #summaries, #sumwrap.folded #sumcount { display: none; }
+  #sumwrap { display: flex; flex-direction: column; min-height: 0; flex: none; background: var(--panel); }
+  #summaries { flex: 1 1 auto; max-height: 38vh; overflow-y: auto; border-top: 1px solid var(--line); padding: 6px 0; }
+  #summaries:empty { display: none; }
+  @media (min-width: 720px) {
+    #sumwrap { width: 38%; max-width: 460px; min-width: 280px; border-left: 1px solid var(--line); }
+    #sumwrap.folded { width: auto; min-width: 0; max-width: none; }
+    #summaries { max-height: none; border-top: none; display: block; }
+  }
+  #live-foot {
+    flex: none; padding: 10px calc(12px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
+    background: var(--panel); border-top: 1px solid var(--line);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  #note { display: none; }
+  #note.show { display: block; }
+  /* 上課時是盲按的，這顆要大（規格 §8.1-3） */
+  #mark {
+    width: 100%; min-height: 64px; border: none; border-radius: 14px;
+    background: var(--accent); color: var(--accent-fg); font-size: 18px; font-weight: 800;
+    transition: transform .08s;
+  }
+  #mark:active { transform: scale(.985); }
+  #mark:disabled { background: var(--panel-2); color: var(--fg-dim); opacity: 1; }
+  .row { display: flex; gap: 8px; }
+  .row .btn { flex: 1; padding: 9px 6px; }
+
+  /* 手抄版：要照著抄，字大行距鬆 */
+  #copy-view { z-index: 45; }
+  @media (min-width: 720px) {
+    #copy-view.show { left: auto; width: 52%; min-width: 360px; border-left: 1px solid var(--line); box-shadow: var(--shadow); }
+  }
+  #copy-body { padding: 18px 20px 28px; }
+  #copy-body li { font-size: 17px; line-height: 1.85; margin-bottom: 9px; }
+  #copy-count { color: var(--fg-dim); font-size: 13px; font-weight: 400; }
+  .checkbox { margin-top: 26px; padding: 14px 16px; border-radius: 10px; background: var(--warn-soft); }
+  .checkbox h2 { margin-top: 0 !important; font-size: 15px; }
+  .checkbox li { font-size: 14px !important; line-height: 1.7 !important; }
+
+  /* 整理中 */
+  #final { z-index: 40; }
+  .waiting { text-align: center; padding-top: 12vh; }
+  .waiting .spin { width: 30px; height: 30px; border-width: 3px; margin-bottom: 14px; }
+  .waiting h2 { margin: 0 0 6px; font-size: 20px; }
+
+  #history { z-index: 40; }
+
+  /* 提示與對話框 ----------------------------------------------------- */
   #toast {
-    position: fixed; left: 50%; bottom: calc(var(--btn-h) + 84px);
-    transform: translateX(-50%); max-width: 88%;
-    background: #2a3039; color: var(--fg); padding: 11px 16px;
-    border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none;
-    transition: opacity .25s; z-index: 20; text-align: center;
+    position: fixed; left: 50%; bottom: calc(150px + env(safe-area-inset-bottom));
+    transform: translateX(-50%); width: max-content; max-width: 88%;
+    background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 10px;
+    font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .25s;
+    z-index: 60; text-align: center; box-shadow: var(--shadow);
   }
   #toast.show { opacity: 1; }
-  #overlay {
-    position: fixed; inset: 0; background: rgba(10,13,16,.94); z-index: 30;
-    display: flex; flex-direction: column; align-items: center;
-    justify-content: center; gap: 18px; padding: 28px; text-align: center;
+  dialog {
+    border: none; border-radius: 16px; padding: 20px; width: min(420px, calc(100vw - 32px));
+    background: var(--panel); color: var(--fg); box-shadow: var(--shadow);
   }
-  #overlay.hide { display: none; }
-  #overlay h1 { margin: 0; font-size: 26px; }
-  #overlay p { margin: 0; color: var(--fg-dim); font-size: 14px; max-width: 30em; }
-  #load-error:empty { display: none; }
-  #load-error {
-    color: var(--warn); font-size: 14px; max-width: 30em; line-height: 1.6;
-    background: rgba(232,177,58,.1); border: 1px solid var(--warn);
-    border-radius: 10px; padding: 12px 14px;
-  }
-  #overlay button:disabled { opacity: .45; }
-  #overlay select, #overlay button {
-    font-size: 17px; padding: 13px 22px; border-radius: 12px;
-    border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
-  }
-  #overlay button.primary {
-    background: var(--accent); color: #06121f; border: none; font-weight: 800;
-    min-width: 220px; min-height: 60px;
-  }
-  #final, #history {
-    position: fixed; inset: 0; background: var(--bg); z-index: 40;
-    display: none; flex-direction: column;
-  }
-  #final.show, #history.show { display: flex; }
-  .bar {
-    display: flex; align-items: center; gap: 12px; flex: none;
-    padding: calc(12px + env(safe-area-inset-top)) 16px 12px;
-    background: var(--panel); border-bottom: 1px solid var(--line);
-    font-weight: 600;
-  }
-  .bar .link {
-    margin-left: auto; background: none; border: none; color: var(--accent);
-    font-size: 15px; cursor: pointer; padding: 6px;
-  }
-  #detail { position: fixed; inset: 0; background: var(--bg); z-index: 46;
-    display: none; flex-direction: column; }
-  #detail.show { display: flex; }
-  #detail-body { flex: 1; overflow-y: auto; padding: 0 0 28px; }
-  .dsec { border-bottom: 1px solid var(--line); }
-  .dsec > summary {
-    display: flex; align-items: center; gap: 8px; cursor: pointer;
-    padding: 15px 16px; font-size: 15px; color: var(--accent);
-    font-weight: 600; list-style: none;
-  }
-  .dsec > summary::-webkit-details-marker { display: none; }
-  .dsec > summary::after {
-    content: '⌄'; margin-left: auto; color: var(--fg-dim);
-    font-weight: 400; transition: transform .12s;
-  }
-  .dsec[open] > summary::after { transform: rotate(180deg); }
-  .dsec > summary:active { background: var(--panel-2); }
-  .dsec .n { color: var(--fg-dim); font-weight: 400; font-size: 12px; }
-  .dbody { padding: 0 16px 16px; }
-  .dsec audio { width: 100%; margin-top: 4px; }
-  .dsec pre {
-    margin: 0; white-space: pre-wrap; word-break: break-word;
-    font-size: 15px; line-height: 1.75; font-family: inherit;
-  }
-  .dsec .empty { color: var(--fg-dim); font-size: 14px; }
-  .dsec .dbtns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-  /* 主要動作：這一節只有一個「該按的」，其餘保持外框樣式 */
-  .dsec .dbtns button.act {
-    background: var(--accent); color: #06121f; border-color: var(--accent);
-    font-weight: 700;
-  }
-  .dsec .dbtns button:disabled { opacity: .55; }
-  .dsec .dbtns button {
-    flex: 1; padding: 10px; font-size: 14px; border-radius: 8px;
-    border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
-    cursor: pointer;
-  }
-  .dsegs { max-height: 40vh; overflow-y: auto; }
-  .dsegs .ln { display: flex; gap: 10px; margin-bottom: 7px; font-size: 14px; }
-  .dsegs .ln .t {
-    color: var(--fg-dim); font-size: 11px; flex: none; padding-top: 3px;
-    font-variant-numeric: tabular-nums;
-  }
-  #history-list { flex: 1; overflow-y: auto; padding: 8px 0; }
-  #history-list:empty::after {
-    content: "還沒有任何紀錄"; display: block; padding: 24px 16px;
-    color: var(--fg-dim); font-size: 14px; text-align: center;
-  }
-  .hrow {
-    display: flex; align-items: center; gap: 12px; width: 100%;
-    padding: 14px 16px; background: none; border: none; cursor: pointer;
-    border-bottom: 1px solid var(--line); color: var(--fg); text-align: left;
-  }
-  .hrow:active { background: var(--panel-2); }
-  /* 時間與時長要分行。兩個都是 span，不撐開成 flex 的話會直接並排黏在一起，
-     .hmeta 的 margin-top 對行內元素也不會生效。 */
-  .hrow .hmain {
-    flex: 1; min-width: 0;
-    display: flex; flex-direction: column; gap: 3px;
-  }
-  .hrow .hcourse { font-weight: 600; font-size: 15px; }
-  .hrow .hmeta { color: var(--fg-dim); font-size: 12px; }
-  .hrow .hbadge {
-    flex: none; font-size: 11px; padding: 3px 8px; border-radius: 999px;
-    background: var(--panel-2); color: var(--fg-dim);
-  }
-  .hrow .hbadge.done { color: var(--ok); }
-  .hitem { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); }
-  .hitem .hrow { border-bottom: none; }
-  .hdel {
-    flex: none; padding: 0 16px; background: none; border: none;
-    color: var(--bad); font-size: 14px; cursor: pointer;
-    border-left: 1px solid var(--line);
-  }
-  .hdel:active { background: rgba(232,87,74,.12); }
-  #usage {
-    flex: none; padding: 10px 16px; font-size: 12px; color: var(--fg-dim);
-    background: var(--panel-2); border-bottom: 1px solid var(--line);
-  }
-  #usage:empty { display: none; }
-  #final pre {
-    flex: 1; overflow: auto; margin: 0; padding: 16px;
-    white-space: pre-wrap; word-break: break-word; font-size: 14px;
-    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  }
+  dialog::backdrop { background: rgba(0, 0, 0, .45); }
+  dialog h3 { margin: 0 0 6px; font-size: 17px; }
+  dialog p { margin: 0 0 14px; font-size: 14px; color: var(--fg-dim); white-space: pre-line; }
+  dialog .field { margin-bottom: 14px; }
+  dialog .btns { justify-content: flex-end; }
+  dialog .btns .btn { flex: 0 1 auto; min-width: 88px; }
 </style>
 </head>
 <body>
 
-<header>
-  <button id="home" title="回首頁">◀ 首頁</button>
-  <button id="hist-top" class="hbtn" title="歷史紀錄與筆記">紀錄</button>
-  <button id="notes-open" class="hbtn" title="看剛才產生的手抄版" hidden>看筆記</button>
-  <span class="dot" id="dot" title="連線狀態"></span>
+<!-- 現場錄音：錄音中才看得到，其餘時候都被首頁蓋住 -->
+<header id="live-head">
+  <button id="home" class="hbtn">離開</button>
+  <button id="hist-top" class="hbtn">紀錄</button>
+  <button id="notes-open" class="hbtn" hidden>看筆記</button>
+  <span class="dot" id="dot"></span>
   <span id="elapsed">00:00:00</span>
   <span class="meta">
     <span id="course">—</span><br>
-    <span id="health">RTF — · 佇列 — · VRAM —</span>
+    <span id="health">準備中…</span>
   </span>
 </header>
 
@@ -489,98 +479,211 @@
   <div id="sumwrap">
     <div id="sumbar" hidden>
       <span id="sumcount"></span>
-      <button id="sum-toggle" title="收合即時整理" aria-label="收合">⌄</button>
+      <button id="sum-toggle" title="收合" aria-label="收合">⌄</button>
     </div>
     <div id="summaries"></div>
   </div>
 </main>
 
-<footer>
-  <input id="note" placeholder="這段的註解（可留空）" enterkeyhint="done">
-  <button id="mark">即 時 整 理</button>
+<footer id="live-foot">
+  <input id="note" type="text" placeholder="這段要特別註記什麼？（選填）" enterkeyhint="done">
+  <button id="mark">整理目前內容</button>
   <div class="row">
-    <button id="notes" class="accent">產生筆記</button>
-    <button id="pause">暫停</button>
-    <button id="end" class="danger">結束課程</button>
+    <button id="note-toggle" class="btn">加註解</button>
+    <button id="notes" class="btn">產生筆記</button>
+    <button id="pause" class="btn">暫停</button>
+    <button id="end" class="btn danger">結束錄音</button>
   </div>
 </footer>
 
-<div id="toast"></div>
+<div id="toast" role="status"></div>
+<dialog id="dlg"></dialog>
 
-<div id="overlay">
-  <h1>課堂即時筆記</h1>
-  <select id="course-select"></select>
-  <button class="primary" id="start">開始錄音</button>
-  <p id="load-error"></p>
-  <div class="row" style="max-width:340px;width:100%">
-    <button id="retry-load">重新連線</button>
-    <button id="open-history">歷史筆記</button>
-  </div>
-  <p>
-    錄音期間請勿切換到其他 App，也不要關閉螢幕。<br>
-    這是 PWA，沒有 foreground service，切走就會斷線。<br>
-    畫面會自動保持喚醒。
-  </p>
-</div>
-
-<div id="final">
-  <header class="bar"><span id="final-title">完整筆記</span></header>
-  <pre id="final-md"></pre>
-  <footer>
-    <div class="row">
-      <button id="copy-md">複製 Markdown</button>
-      <button id="download-md">下載 .md</button>
-      <button id="final-close">關閉</button>
-      <button id="final-home">回首頁</button>
+<!-- 首頁 -->
+<div id="overlay" class="screen show">
+  <div class="scroll">
+    <div class="wrap">
+      <div class="brand">
+        <img src="icon.svg" alt="">
+        <div><h1>nobook</h1><p>把錄音變成逐字稿和筆記</p></div>
+      </div>
+      <div id="conn-error" class="card warn" hidden>
+        <h3>連不上伺服器</h3>
+        <p id="load-error"></p>
+        <button id="retry-load" class="btn">重新連線</button>
+      </div>
+      <div class="actions">
+        <button id="open-upload" class="action primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+          <span><b>上傳錄音檔</b><small>已經錄好的會議或課堂錄音</small></span>
+        </button>
+        <button id="open-live" class="action">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          <span><b>現場錄音</b><small>邊錄邊出逐字稿，畫面要一直開著</small></span>
+        </button>
+      </div>
+      <div class="sechead-row">
+        <h2>最近的紀錄</h2>
+        <button id="open-history" class="link">全部紀錄</button>
+      </div>
+      <div id="recent-list" class="rows"></div>
+      <div id="recent-empty" class="empty-note" hidden>還沒有紀錄。上傳一個錄音檔試試看。</div>
     </div>
-  </footer>
+  </div>
 </div>
 
-<!-- 歷史紀錄：所有上過的課都存在資料庫裡，隨時可以叫回來看 -->
-<div id="copy-view">
+<!-- 上傳 -->
+<div id="upload" class="screen">
   <header class="bar">
-    <span>手抄版筆記</span><span id="copy-count"></span>
+    <button id="upload-close" class="link">← 返回</button>
+    <span class="title">上傳錄音檔</span>
+  </header>
+  <div class="scroll">
+    <div class="wrap">
+      <label class="drop" id="drop">
+        <input id="up-file" type="file" multiple
+               accept="audio/*,.m4a,.mp3,.wav,.aac,.flac,.ogg,.opus,.mp4,.mov,.webm,.qta,.caf,.aif,.aiff,.wma">
+        <b>選擇錄音檔</b>
+        <small>可以一次選好幾個。m4a、mp3、wav 都可以。</small>
+      </label>
+      <details class="howto" id="ios-howto">
+        <summary>iPhone「語音備忘錄」的錄音怎麼選？</summary>
+        <ol>
+          <li>打開「語音備忘錄」，點要上傳的那則錄音</li>
+          <li>點「⋯」→「儲存到檔案」</li>
+          <li>回到這裡點「選擇錄音檔」，到「檔案」裡選它</li>
+        </ol>
+      </details>
+      <div id="up-list" class="uflist"></div>
+
+      <div id="up-form">
+        <div class="field">
+          <label for="up-course">這是什麼錄音？</label>
+          <select id="up-course"></select>
+        </div>
+        <div class="field" id="up-speakers-field">
+          <label for="up-speakers">有幾個人講話？</label>
+          <select id="up-speakers">
+            <option value="0">不確定，自動判斷</option>
+            <option value="1">1 人</option>
+            <option value="2">2 人</option>
+            <option value="3">3 人</option>
+            <option value="4">4 人</option>
+            <option value="5">5 人</option>
+            <option value="6">6 人</option>
+            <option value="7">7 人</option>
+            <option value="8">8 人</option>
+          </select>
+          <p class="hint">知道人數的話，誰講了哪句會分得比較準。</p>
+        </div>
+        <details class="adv">
+          <summary>常出現的人名或專有名詞（選填）</summary>
+          <div class="field">
+            <textarea id="up-terms" placeholder="王小明、負載卸載、生成式 AI"></textarea>
+            <p class="hint">用頓號分開，專有名詞會比較不容易聽錯。已經知道會錯成什麼的話，寫成「深層式=生成式」就會自動改掉。</p>
+          </div>
+        </details>
+      </div>
+
+      <button id="up-start" class="btn primary big" disabled>開始上傳</button>
+      <p id="up-tip" class="hint" style="margin-top:10px" hidden>
+        上傳時請留在這個畫面、不要鎖定手機。如果中斷了，回到這裡會自動接著傳。
+      </p>
+      <div id="up-done" class="card" style="margin-top:14px" hidden>
+        <h3>上傳完成，開始轉文字</h3>
+        <p>一小時的錄音大約要 6 分鐘。轉文字在伺服器上進行，現在可以關掉這個畫面，好了之後會出現在紀錄裡。</p>
+        <button id="up-done-home" class="btn primary">回首頁看進度</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 開始現場錄音 -->
+<div id="live-setup" class="screen">
+  <header class="bar">
+    <button id="live-close" class="link">← 返回</button>
+    <span class="title">現場錄音</span>
+  </header>
+  <div class="scroll">
+    <div class="wrap">
+      <div class="field">
+        <label for="course-select">這是什麼錄音？</label>
+        <select id="course-select"></select>
+      </div>
+      <div class="card warn d-block">
+        <h3>錄音時請注意</h3>
+        <p>畫面要一直開著。切到其他 App、鎖定手機或接電話，那段就錄不到。怕中斷的話，建議用手機內建的錄音 App 錄好再上傳。</p>
+      </div>
+      <p id="mic-error" class="hint" style="color:var(--bad);margin-bottom:12px" hidden></p>
+      <button class="btn primary big" id="start">開始錄音</button>
+    </div>
+  </div>
+</div>
+
+<!-- 結束錄音後的等待畫面 -->
+<div id="final" class="screen">
+  <header class="bar"><span class="title" id="final-title">整理中</span></header>
+  <div class="scroll"><div class="wrap waiting" id="final-md"></div></div>
+  <div style="padding:12px 16px calc(12px + env(safe-area-inset-bottom))">
+    <button id="final-home" class="btn big">回首頁</button>
+  </div>
+</div>
+
+<!-- 手抄版 -->
+<div id="copy-view" class="screen">
+  <header class="bar">
+    <span class="title">手抄版筆記 <span id="copy-count"></span></span>
     <button id="copy-close" class="link">關閉</button>
   </header>
-  <div id="copy-body"></div>
-  <footer>
-    <div class="row">
-      <button id="copy-text">複製</button>
-      <button id="copy-dl-md">.md</button>
-      <button id="copy-docx">Word</button>
-      <button id="copy-refresh">重新產生</button>
-    </div>
-  </footer>
+  <div class="scroll md" id="copy-body"></div>
+  <div class="row" style="padding:10px 12px calc(10px + env(safe-area-inset-bottom))">
+    <button id="copy-text" class="btn">複製</button>
+    <button id="copy-docx" class="btn">Word</button>
+    <button id="copy-refresh" class="btn">重新產生</button>
+  </div>
 </div>
 
-<div id="detail">
+<!-- 單筆紀錄 -->
+<div id="detail" class="screen">
   <header class="bar">
-    <span id="detail-title">課堂紀錄</span>
-    <button id="detail-close" class="link">關閉</button>
+    <button id="detail-close" class="link">← 返回</button>
+    <span class="title" id="detail-title">紀錄</span>
+    <button id="detail-delete" class="link" style="color:var(--bad)">刪除</button>
   </header>
-  <div id="detail-body"></div>
+  <div class="scroll" id="detail-scroll">
+    <div class="wrap" id="detail-body"></div>
+  </div>
 </div>
 
-<div id="history">
+<!-- 全部紀錄 -->
+<div id="history" class="screen">
   <header class="bar">
-    <span>歷史筆記</span>
+    <button id="history-close" class="link">← 返回</button>
+    <span class="title">全部紀錄</span>
     <span id="build"></span>
-    <button id="history-close" class="link">關閉</button>
+    <button id="select-start" class="link">選取</button>
   </header>
-  <div id="usage"></div>
-  <div id="history-list"></div>
+  <div class="scroll">
+    <div class="wrap">
+      <div class="field" style="margin-bottom:12px">
+        <input id="history-search" type="search" placeholder="搜尋名稱或日期" aria-label="搜尋紀錄">
+      </div>
+      <div id="history-list"></div>
+      <div id="usage"></div>
+    </div>
+  </div>
   <div id="select-bar">
-    <span id="select-count"></span>
+    <span id="select-count" class="spacer"></span>
+    <button id="select-cancel" class="btn">取消</button>
+    <button id="select-delete" class="btn danger">刪除</button>
+    <button id="select-merge" class="btn primary">合併</button>
     <span id="select-why"></span>
-    <span class="spacer"></span>
-    <button id="select-cancel" class="link">取消</button>
-    <button id="select-merge">合併</button>
   </div>
 </div>
 
 <!-- ?v= 是必要的：index.html 和 app.js 會被各自快取，版本對不上時
      畫面上看得到新按鈕、但監聽器在舊檔裡，按了完全沒反應。
      這個字串要跟 sw.js 的 VERSION 一致，selftest 會檢查。 -->
-<script src="app.js?v=v23"></script>
+<script src="app.js?v=v24"></script>
 </body>
 </html>

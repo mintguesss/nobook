@@ -7,12 +7,12 @@ import json
 import logging
 import time
 
-from fastapi import Body, FastAPI, HTTPException, Query, WebSocket
+from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import (asr, audio_pipeline, audio_store, config, courses, export,
-               storage, term_fix, ws_session)
+               storage, term_fix, uploads, ws_session)
 from .llm_manager import LLMManager, LLMUnavailable
 from .summarizer import Summarizer
 
@@ -61,12 +61,16 @@ async def lifespan(app: FastAPI):
     # 先把 silero-vad 載進來，第一堂課的第一段才不會多等模型載入
     asyncio.get_running_loop().run_in_executor(None, audio_pipeline.default_vad)
     idle_task = asyncio.create_task(_idle_unload_loop(llm))
+    upload_task = uploads.start(state["engine"], llm, _finish_from_db)
     try:
         yield
     finally:
         idle_task.cancel()
+        upload_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await idle_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await upload_task
         with contextlib.suppress(Exception):
             await llm.shutdown()
         with contextlib.suppress(Exception):
@@ -101,6 +105,74 @@ async def health():
 @app.get("/api/courses")
 async def api_courses():
     return courses.list_courses()
+
+
+# ── 上傳錄音檔 ────────────────────────────────────────────────────────
+@app.post("/api/uploads")
+async def api_upload_create(payload: dict = Body(...)):
+    try:
+        return uploads.create(
+            str(payload.get("filename") or ""), int(payload.get("size") or 0),
+            str(payload.get("course_id") or "meeting"),
+            int(payload.get("speakers") or 0), str(payload.get("terms") or ""),
+            str(payload.get("note") or ""), str(payload.get("recorded_at") or ""))
+    except uploads.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=400, detail="找不到這個分類")
+
+
+@app.get("/api/uploads/{upload_id}")
+async def api_upload_status(upload_id: str):
+    try:
+        return {"received": uploads.received(upload_id)}
+    except uploads.UploadError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.put("/api/uploads/{upload_id}")
+async def api_upload_chunk(upload_id: str, request: Request, offset: int = Query(0, ge=0)):
+    try:
+        return {"received": await uploads.write_chunk(upload_id, offset, request.stream())}
+    except uploads.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/uploads/{upload_id}/complete")
+async def api_upload_complete(upload_id: str):
+    try:
+        return uploads.complete(upload_id)
+    except uploads.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/uploads/{upload_id}")
+async def api_upload_discard(upload_id: str):
+    try:
+        uploads.discard(upload_id)
+    except uploads.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.post("/api/sessions/{session_id}/retranscribe")
+async def api_retranscribe(session_id: str, speakers: int = Body(0, embed=True)):
+    """用保存的錄音重轉：講者人數判斷錯了、轉失敗重試、現場錄的要補標講者。"""
+    try:
+        uploads.retranscribe(session_id, speakers)
+    except uploads.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.post("/api/sessions/{session_id}/speakers")
+async def api_set_speakers(session_id: str, names: dict = Body(..., embed=True)):
+    """幫「講者 1」取名字。"""
+    if storage.get_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    clean = {str(k): str(v).strip()[:20] for k, v in names.items() if str(v).strip()}
+    storage.set_speaker_names(session_id, clean)
+    return {"ok": True, "names": clean}
 
 
 @app.get("/api/sessions")
@@ -141,6 +213,8 @@ async def api_delete_session(session_id: str):
     import os
     if storage.get_session(session_id) is None:
         raise HTTPException(status_code=404, detail="session not found")
+    uploads.cancel(session_id)
+    uploads.remove_source(session_id)
     audio = storage.delete_session(session_id)
     removed_audio = False
     if audio and os.path.exists(audio):

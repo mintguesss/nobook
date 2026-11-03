@@ -171,8 +171,16 @@ def build_handcopy(course, session, notes) -> str:
 
 def build_txt(session, segments) -> str:
     lines = ["# %s  %s" % (session.get("id", ""), session.get("started_at", "")), ""]
+    try:
+        names = json.loads(session.get("speaker_names") or "{}") or {}
+    except ValueError:
+        names = {}
     for s in segments:
-        lines.append("[%s] %s" % (fmt_ts(s.get("start_s", 0.0)), s.get("text", "")))
+        spk = s.get("speaker")
+        who = ""
+        if spk:
+            who = "%s：" % (names.get(str(spk)) or "講者 %s" % spk)
+        lines.append("[%s] %s%s" % (fmt_ts(s.get("start_s", 0.0)), who, s.get("text", "")))
     return "\n".join(lines) + "\n"
 
 
