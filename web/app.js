@@ -959,11 +959,38 @@ function historyRow(r, courseName, showCourse) {
 }
 
 // 首頁的最近紀錄
+// 剛打開時 Tailscale 可能還沒連上。畫面已經從快取開起來了，連上之後把資料補回來，
+// 不用使用者關掉重開。
+let onlineRetry = null;
+// 網路卡住時請求不會失敗、只會一直等，不設時限就永遠不會重試
+function fetchSoon(url, ms = 4000) {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), ms);
+  return fetch(url, { signal: abort.signal }).finally(() => clearTimeout(timer));
+}
+function retryWhenOnline() {
+  if (onlineRetry) return;
+  let trying = false;
+  onlineRetry = setInterval(async () => {
+    if (trying) return;
+    trying = true;
+    try {
+      const r = await fetchSoon('/api/health', 1800);
+      if (!r.ok) return;
+    } catch (e) { return; } finally { trying = false; }
+    clearInterval(onlineRetry);
+    onlineRetry = null;
+    loadCourses();
+    renderRecent();
+    if (swReg) swReg.update().catch(() => { /* 下次再檢查 */ });
+  }, 2000);
+}
+
 async function renderRecent() {
   let rows;
   try {
-    rows = await (await fetch('/api/sessions?limit=6')).json();
-  } catch (e) { return; }
+    rows = await (await fetchSoon('/api/sessions?limit=6')).json();
+  } catch (e) { retryWhenOnline(); return; }
   const courses = await fetchCourseNames();
   const list = $('recent-list');
   list.innerHTML = '';
@@ -2347,7 +2374,7 @@ async function loadCourses() {
   // 連不上時**不要**默默塞一個假的課程進去。原本的寫法會顯示「範例課程」，
   // 看起來像是課程檔案不見了，實際上只是伺服器沒開——誤導比報錯更糟。
   try {
-    const r = await fetch('/api/courses');
+    const r = await fetchSoon('/api/courses');
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const list = await r.json();
     if (!list.length) throw new Error('伺服器沒有回報任何課程');
@@ -2413,33 +2440,31 @@ window.addEventListener('beforeunload', (e) => {
   if ((state.running && !state.ended) || up.running) { e.preventDefault(); e.returnValue = ''; }
 });
 
+let swReg = null;
 if ('serviceWorker' in navigator) {
+  const pageVersion = new URL(document.currentScript.src).searchParams.get('v');
+  // 網路優先的情況下，打開時拿到的通常已經是新版。只有這一頁真的比較舊才重新載入，
+  // 不然每次改版都會多載入一次，封面閃一下。
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (!e.data || e.data.type !== 'version' || e.data.version === pageVersion) return;
+    // 錄音中絕對不能自動重載。實測在課堂中途更新版本，平板會直接
+    // 重新整理，那堂課就變成孤兒——伺服器端還活著，但前端認不回去。
+    // 等這堂結束再換版，課比版本新舊重要。
+    const busy = () => (state.running && !state.ended) || up.running;
+    if (busy()) {
+      toast('有新版本，目前的工作完成後會自動更新', 5000);
+      const wait = setInterval(() => {
+        if (busy()) return;
+        clearInterval(wait);
+        location.reload();
+      }, 5000);
+      return;
+    }
+    location.reload();
+  });
   navigator.serviceWorker.register('sw.js').then((reg) => {
-    // 有新版就立刻換掉並重新整理。先前 cache-first 的寫法讓改版
-    // 永遠送不到手機上，而且外觀完全看不出來在跑舊程式。
-    reg.addEventListener('updatefound', () => {
-      const w = reg.installing;
-      if (!w) return;
-      w.addEventListener('statechange', () => {
-        if (w.state !== 'installed' || !navigator.serviceWorker.controller) return;
-        // 錄音中絕對不能自動重載。實測在課堂中途更新版本，平板會直接
-        // 重新整理，那堂課就變成孤兒——伺服器端還活著，但前端認不回去。
-        // 等這堂結束再換版，課比版本新舊重要。
-        const busy = () => (state.running && !state.ended) || up.running;
-        if (busy()) {
-          toast('有新版本，目前的工作完成後會自動更新', 5000);
-          const wait = setInterval(() => {
-            if (busy()) return;
-            clearInterval(wait);
-            location.reload();
-          }, 5000);
-          return;
-        }
-        toast('已更新到新版本，正在重新載入…');
-        setTimeout(() => location.reload(), 800);
-      });
-    });
-    reg.update();
+    swReg = reg;
+    reg.update().catch(() => { /* 連不上，下次再檢查 */ });
   }).catch(() => { /* 沒有 SW 也能用 */ });
 }
 

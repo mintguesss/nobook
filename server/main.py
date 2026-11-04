@@ -605,8 +605,20 @@ async def api_bench():
 
 
 # ── 靜態 PWA ──────────────────────────────────────────────────────────
+class _WebFiles(StaticFiles):
+    """沒有 Cache-Control 的話瀏覽器會自己猜新鮮期，改版後還會拿到舊頁面。
+
+    no-cache 是每次都要問過伺服器，沒改就回 304，不會多下載。
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 if config.WEB_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(config.WEB_DIR), html=True), name="web")
+    app.mount("/", _WebFiles(directory=str(config.WEB_DIR), html=True), name="web")
 else:  # pragma: no cover
     @app.get("/")
     async def _no_web():
