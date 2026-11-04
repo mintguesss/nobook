@@ -316,6 +316,12 @@ def replace_segments(session_id: str, rows) -> None:
         )
 
 
+def update_segment_texts(changes) -> None:
+    """changes: [(新文字, 列 id)]"""
+    with _cursor() as cur:
+        cur.executemany("UPDATE segments SET text=? WHERE id=?", changes)
+
+
 def set_job(session_id: str, job: dict) -> None:
     with _cursor() as cur:
         cur.execute("UPDATE sessions SET job=? WHERE id=?",

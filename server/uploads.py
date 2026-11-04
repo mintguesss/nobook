@@ -289,6 +289,9 @@ async def _run_job(session_id: str) -> None:
     from .vad import make_vad
     course = courses.get_course(s["course_id"])
     glossary, corrections = meeting.parse_terms(job.get("terms", ""))
+    known = known_fixes(session_id)
+    glossary = list(known.values()) + glossary
+    corrections = {**known, **corrections}
     course = meeting.with_terms(course, glossary, corrections)
     fixer = term_fix.TermFixer(course.glossary, corrections=course.corrections)
 
@@ -297,6 +300,7 @@ async def _run_job(session_id: str) -> None:
     audio, audio_path = await _prepare_audio(session_id, s, job, course)
     duration = len(audio) / float(config.SAMPLE_RATE)
     _update(session_id, job, duration_s=duration, started_ts=time.time())
+    tick = time.monotonic()
     # VAD 帶狀態，不能跟現場錄音共用
     vad = await asyncio.to_thread(make_vad)
 
@@ -308,7 +312,9 @@ async def _run_job(session_id: str) -> None:
                                         job.get("speakers") or 0)
 
     _check_cancel(session_id)
-    _update(session_id, job, stage="transcribing", progress=0)
+    speakers_s = round(time.monotonic() - tick)
+    tick = time.monotonic()
+    _update(session_id, job, stage="transcribing", progress=0, speakers_s=speakers_s)
     segments = await asyncio.to_thread(meeting.split_segments, audio, vad)
     rows, fixes = [], []
     for i, seg in enumerate(segments):
@@ -319,6 +325,8 @@ async def _run_job(session_id: str) -> None:
         if i % PROGRESS_EVERY == 0:
             _update(session_id, job, progress=round(i / max(1, len(segments)), 3))
 
+    job["transcribe_s"] = round(time.monotonic() - tick)
+    log.info("講者辨識 %d 秒，轉文字 %d 秒", speakers_s, job["transcribe_s"])
     rows = meeting.merge_rows(rows)
     if job.get("diarize") and punctuate.available():
         await asyncio.to_thread(punctuate.punctuate_rows, rows)
@@ -366,9 +374,18 @@ async def _run_meeting_notes(session_id: str, job: dict) -> None:
     except ValueError:
         names = {}
     glossary, _ = meeting.parse_terms(job.get("terms", ""))
+    tick = time.monotonic()
     try:
+        segments = storage.list_segments(session_id)
+        # 先改掉聽錯的詞，之後的整理和看逐字稿的人看到的才是對的
+        fixes = {**known_fixes(session_id), **job.get("auto_fixes", {}),
+                 **await meeting_notes.infer_fixes(summarizer, segments, before_call)}
+        changes = meeting_notes.apply_fixes(segments, fixes)
+        if changes:
+            storage.update_segment_texts(changes)
+        job["auto_fixes"] = fixes
         notes = await meeting_notes.generate(
-            summarizer, storage.list_segments(session_id), names, glossary,
+            summarizer, segments, names, glossary,
             on_progress, before_call)
     except _Cancelled:
         raise
@@ -385,7 +402,17 @@ async def _run_meeting_notes(session_id: str, job: dict) -> None:
         s["started_at"], [n["name"] for n in meeting_sheets()
                           if n["started_at"] < s["started_at"]])
     storage.set_meeting_notes(session_id, notes)
-    _update(session_id, job, notes_status="done", notes_progress=1)
+    _update(session_id, job, notes_status="done", notes_progress=1,
+            notes_s=round(time.monotonic() - tick))
+
+
+def known_fixes(exclude_id: str = "") -> dict:
+    """之前的會議推斷出來的錯字對照。同一批人講的詞差不多，新的錄音直接用得上。"""
+    known = {}
+    for row in storage.list_meeting_notes():
+        if row["id"] != exclude_id:
+            known.update(load_job(storage.get_session(row["id"]) or {}).get("auto_fixes") or {})
+    return known
 
 
 def meeting_sheets() -> list:

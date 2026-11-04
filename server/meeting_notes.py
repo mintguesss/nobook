@@ -20,16 +20,16 @@ log = logging.getLogger(__name__)
 # 欄位說明只列主題、不寫成句子：寫成「怎麼評估期刊」這種句子，模型會照抄成一則筆記，
 # 實測逐字稿完全沒提期刊也會寫出「文獻需評估期刊影響力」。
 COLUMNS = (
-    ("literature", "文獻整理重點", "找文獻和讀文獻的方法、研究方法、理論", 14),
-    ("topic", "題目整理建議", "對論文題目、變數、架構、實驗或問卷設計的回饋", 12),
-    ("next", "下次目標", "明確交代或答應要做的工作", 6),
-    ("ideas", "可用觀點記錄", "可以用在研究裡的觀點、案例、現象", 6),
+    ("literature", "文獻整理重點", "找文獻和讀文獻的方法、研究方法、理論", 18),
+    ("topic", "題目整理建議", "對論文題目、變數、架構、實驗或問卷設計的回饋", 16),
+    ("next", "下次目標", "明確交代或答應要做的工作", 8),
+    ("ideas", "可用觀點記錄", "可以用在研究裡的觀點、案例、現象", 8),
     ("misc", "小事記錄", "研討會、補助、截止日期、行政與報告上的提醒", 6),
 )
 COLUMN_KEYS = tuple(c[0] for c in COLUMNS)
 
 # 一塊太大的話模型只挑得出少數幾則，實測 12000 字一塊只抽得出手寫表的三分之一
-MAP_CHUNK_CHARS = 3000
+MAP_CHUNK_CHARS = 2000
 MAP_MAX_TOKENS = 1500
 REDUCE_MAX_TOKENS = 2500
 # 字數太短的幾乎都是語助詞，或沒人講話時辨識出來的幻覺
@@ -41,6 +41,9 @@ CONTEXT = """這是一場論文指導會議，通常是一位教授和兩位研�
 逐字稿的講者是用聲音自動分的，可能認錯。標了（教授）的是講最多話的人，通常就是教授，但還是要看內容判斷。"""
 
 RULES = """- 主要收教授講的話：他的建議、糾正、提問、舉的例子、交代的事。
+- 同一件事討論到最後有結論時，以教授最後的結論為準。教授說太難做、時程來不及、暫時不考慮的，要寫成不做和原因，不可以寫成要去做。
+- 教授只是舉一個情況來說明、或提出來再否定的，不算建議。
+- 教授明確下判斷的話一定要收，例如「一定要」「必須」「不用」「不要」「可以放棄」「最重要」「這樣就好」。
 - 學生報告的文獻或題目本身不要收。只有教授對它有回應時才收，而且寫的是教授的回應。
 - 教授說「不用」「不要」「先不要」的事，要照原意寫成不用做，絕對不可以寫反。
 - 教授舉例說明一個道理時，寫下那個道理；例子有趣或可以用的才放進可用觀點。
@@ -83,7 +86,7 @@ REDUCE_SYSTEM = """你在幫研究生整理論文指導會議的紀錄。使用�
 - 講同一件事的合併成一則，ids 列出合併了哪幾個候選的編號。
 - 只能用候選裡有的內容，不可以加入候選沒有的資訊。
 - 不屬於這一欄的、空泛沒有內容的（例如「要多讀論文」這種沒有具體做法的）直接丟掉。
-- 最多 {limit} 則，重要的優先，照候選原本的先後順序排列。
+- 最多 {limit} 則，重要的優先，前半場和後半場都要有，不可以只留前面的。照候選原本的先後順序排列。
 - 每則不超過 70 字，保持短筆記的語氣，不要寫「老師說」「教授建議」。
 
 只輸出 JSON：{{"fields":{{"items":[{{"text":"…","ids":[1,4]}}]}}}}
@@ -127,6 +130,66 @@ REDUCE_SCHEMA = {
 }
 
 
+TERMS_SYSTEM = """逐字稿是語音辨識的，專有名詞常被聽錯。這是一場論文指導會議，主題和用詞請從逐字稿本身判斷。
+
+找出這段裡聽錯的學術或專有名詞，給出正確寫法。聽錯的詞通常讀起來像正確的詞，放在句子裡卻講不通，例如：
+- 「深層式 AI」應該是「生成式 AI」：wrong 是「深層式」，right 是「生成式」
+- 「問卷的信度和小度」應該是「信度和效度」：wrong 是「小度」，right 是「效度」
+
+規則：
+- wrong 從逐字稿一字不差地抄，right 的字數要和 wrong 一樣，兩者一定不同。
+- 沒有錯的詞不要列出來。不確定、只是口語不順的也不要列。
+- 不要改人名，不要改英文，不要改一般詞彙。沒有就給空陣列。
+
+只輸出 JSON：{"fields":{"fixes":[{"wrong":"…","right":"…"}]}}
+"""
+TERMS_SCHEMA = {
+    "type": "object",
+    "properties": {"fields": {
+        "type": "object",
+        "properties": {"fixes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"wrong": {"type": "string"}, "right": {"type": "string"}},
+                "required": ["wrong", "right"],
+            },
+        }},
+        "required": ["fixes"],
+    }},
+    "required": ["fields"],
+}
+TERMS_MAX_TOKENS = 400
+
+CHECK_SYSTEM = """你在核對一份論文指導會議的筆記有沒有寫錯。使用者會給你一則筆記和它前後的逐字稿，\
+逐字稿是語音辨識的，有錯字，講者也可能標錯，請看內容判斷。
+
+verdict 只能是：
+- ok：筆記符合討論的結論。
+- reversed：意思和教授的結論相反，例如教授說太難做、不考慮、不用，筆記卻寫成要做。
+- unsupported：逐字稿沒有講這件事，或語句不通看不出在講什麼。
+
+只能根據這段逐字稿判斷，不可以補充。
+
+只輸出 JSON：{"fields":{"verdict":"ok"}}
+"""
+CHECK_SCHEMA = {
+    "type": "object",
+    "properties": {"fields": {
+        "type": "object",
+        "properties": {"verdict": {"type": "string", "enum": ["ok", "reversed", "unsupported"]}},
+        "required": ["verdict"],
+    }},
+    "required": ["fields"],
+}
+CHECK_MAX_TOKENS = 200
+# 結論常在舉例之後才出現，往後多看一點
+CHECK_BEFORE_S = 60
+CHECK_AFTER_S = 180
+# 另一位講者這麼短的話不像在報告，講者又常標錯，所以也算依據
+SHORT_LINE_CHARS = 100
+
+
 class NoContent(ValueError):
     """逐字稿太短，沒有東西可以整理。"""
 
@@ -157,6 +220,26 @@ def transcript_lines(segments, names=None) -> list:
         out.append((float(g.get("start_s") or 0.0),
                     "[%s] %s：%s" % (fmt_ts(g.get("start_s") or 0.0), who, text)))
     return out
+
+
+def dedupe_items(items) -> list:
+    """同一則不要出現兩次。比對時不看標點和空白，留時間最早的。"""
+    seen, out = set(), []
+    for it in sorted(items, key=lambda it: it["t"]):
+        key = _NOISE_RE.sub("", it["text"])
+        if key not in seen:
+            seen.add(key)
+            out.append(it)
+    return out
+
+
+def _skip_chars(lines, chars: int) -> list:
+    skipped = 0
+    for i, (_, line) in enumerate(lines):
+        if skipped >= chars:
+            return lines[i:]
+        skipped += len(line) + 1
+    return []
 
 
 def chunk_lines(lines, limit: int) -> list:
@@ -207,6 +290,114 @@ def grounded(item: dict, source: set) -> bool:
             and len(text & source) / len(text) >= TEXT_MIN_MATCH)
 
 
+def support_lines(chunk) -> list:
+    """可以當筆記依據的行。學生報告的內容不算；報告都是長段落，短句多半是對答。"""
+    lines = [line for _, line in chunk]
+    out = [line for line in lines
+           if "（教授）" in line or "講者?" in line
+           or len(line.split("：", 1)[-1]) <= SHORT_LINE_CHARS]
+    return out or lines
+
+
+_MIN_TERM, _MAX_TERM = 2, 8
+# 兩個字的詞同音的多，正確的詞沒出現過、又被「聽錯」這麼多次，比較可能是本來就在講這個詞。
+# 三個字以上同音又講不通的就很少是巧合。
+_MAX_UNSEEN_WRONG = 3
+_SOUND_ALIKE = 0.85
+
+
+def valid_fix(wrong: str, right: str, transcript: str, similar) -> bool:
+    """模型提的錯字對照能不能信。改錯會直接弄壞逐字稿，所以條件訂得嚴。
+
+    similar(a, b) 回傳兩個詞的讀音相似度 0~1。
+    """
+    if (wrong == right or len(wrong) != len(right)
+            or not _MIN_TERM <= len(wrong) <= _MAX_TERM
+            or wrong.isascii() or right.isascii() or wrong not in transcript):
+        return False
+    if not any(a == b for a, b in zip(wrong, right)):
+        return False
+    if right in transcript:
+        return True
+    if similar(wrong, right) < _SOUND_ALIKE:
+        return False
+    return len(wrong) >= 3 or transcript.count(wrong) <= _MAX_UNSEEN_WRONG
+
+
+async def infer_fixes(summarizer, segments, before_call=None) -> dict:
+    """從逐字稿自己推斷聽錯的詞，回傳 {錯: 對}。"""
+    from .term_fix import _phon_similar
+    lines = transcript_lines(segments)
+    if not lines:
+        return {}
+    if before_call:
+        await before_call()
+    await summarizer.manager.ensure("final")
+    transcript = "".join(g.get("text") or "" for g in segments)
+    fixes = {}
+    for ch in chunk_lines(lines, min(MAP_CHUNK_CHARS, summarizer._max_prompt_chars())):
+        if before_call:
+            await before_call()
+        await summarizer.manager.ensure("final")
+        obj, _ = await summarizer._chat_json(
+            TERMS_SYSTEM, "\n".join(line for _, line in ch), TERMS_MAX_TOKENS, TERMS_SCHEMA)
+        fields = (obj or {}).get("fields") if isinstance(obj, dict) else None
+        for it in (fields or {}).get("fixes") or []:
+            if not isinstance(it, dict):
+                continue
+            wrong, right = str(it.get("wrong") or "").strip(), str(it.get("right") or "").strip()
+            if valid_fix(wrong, right, transcript, _phon_similar):
+                fixes[wrong] = right
+            elif wrong and wrong != right:
+                log.info("不採用模型提的錯字對照：%s → %s", wrong, right)
+    return fixes
+
+
+def apply_fixes(segments, fixes) -> list:
+    """就地改掉 segments 的錯字，回傳有改到的 [(新文字, 列 id)]。"""
+    changed = []
+    for g in segments:
+        text = g.get("text") or ""
+        new = text
+        for wrong, right in fixes.items():
+            new = new.replace(wrong, right)
+        if new != text:
+            g["text"] = new
+            if g.get("id") is not None:
+                changed.append((new, g["id"]))
+    return changed
+
+
+async def _check_items(summarizer, columns, lines, before_call, tick=None) -> int:
+    """回頭對照前後文核對每一則，有問題的丟掉，回傳丟掉的則數。
+
+    只刪不改：讓模型改寫的話，實測會把「呈負相關」自己改成「呈正相關」。
+    """
+    changed = 0
+    for key in COLUMN_KEYS:
+        kept = []
+        for it in columns[key]:
+            if before_call:
+                await before_call()
+            await summarizer.manager.ensure("final")
+            near = [line for t, line in lines
+                    if it["t"] - CHECK_BEFORE_S <= t <= it["t"] + CHECK_AFTER_S]
+            obj, _ = await summarizer._chat_json(
+                CHECK_SYSTEM, "筆記：%s\n\n逐字稿：\n%s" % (it["text"], "\n".join(near)),
+                CHECK_MAX_TOKENS, CHECK_SCHEMA)
+            if tick:
+                await tick()
+            fields = (obj or {}).get("fields") if isinstance(obj, dict) else None
+            verdict = (fields or {}).get("verdict") or "ok"
+            if verdict != "ok":
+                changed += 1
+                log.info("核對後丟掉（%s）：%s", verdict, it["text"])
+                continue
+            kept.append(it)
+        columns[key] = kept
+    return changed
+
+
 def clean_item(text) -> str:
     text = re.sub(r"\s+", " ", str(text or "")).strip()
     # 編號在匯出時統一加，模型自己編的要拿掉
@@ -229,11 +420,16 @@ async def generate(summarizer, segments, names=None, terms=(),
     if before_call:
         await before_call()
     await summarizer.manager.ensure("final")
-    chunks = chunk_lines(lines, min(MAP_CHUNK_CHARS, summarizer._max_prompt_chars()))
+    size = min(MAP_CHUNK_CHARS, summarizer._max_prompt_chars())
+    chunks = chunk_lines(lines, size)
+    # 模型每次只挑得出一部分，落在切塊交界的話也容易漏，所以錯開半塊再抽一輪
+    if len(chunks) > 1:
+        chunks += chunk_lines(_skip_chars(lines, size // 2), size)
     extra = ""
     if terms:
         extra = "這場會議會出現的詞（寫法以這裡為準）：%s\n\n" % "、".join(terms)
-    steps = len(chunks) + len(COLUMNS)
+    # 核對要一則一則來，則數要等合併完才知道，先用每欄上限估進度
+    steps = len(chunks) + len(COLUMNS) + sum(c[3] for c in COLUMNS)
     done = 0
 
     async def tick():
@@ -249,9 +445,7 @@ async def generate(summarizer, segments, names=None, terms=(),
             await before_call()
         await summarizer.manager.ensure("final")
         hi = ch[-1][0] + 60
-        # 學生報告的內容不算依據，只比對教授和沒標到講者的行。沒有分講者的錄音就全部都算。
-        spoken = [line for _, line in ch if "（教授）" in line or "講者?" in line] or [line for _, line in ch]
-        source = _bigrams(" ".join(line.split("：", 1)[-1] for line in spoken))
+        source = _bigrams(" ".join(line.split("：", 1)[-1] for line in support_lines(ch)))
         obj, _ = await summarizer._chat_json(
             MAP_SYSTEM, extra + "\n".join(line for _, line in ch),
             MAP_MAX_TOKENS, MAP_SCHEMA)
@@ -279,11 +473,29 @@ async def generate(summarizer, segments, names=None, terms=(),
     for key, title, desc, limit in COLUMNS:
         if before_call:
             await before_call()
-        columns[key] = await _reduce(summarizer, title, desc, limit, raw[key])
+        columns[key] = dedupe_items(await _reduce(summarizer, title, desc, limit, dedupe_items(raw[key])))
         await tick()
+    # 同一句話放進兩欄也算重複，留在前面那欄
+    seen = set()
+    for key in COLUMN_KEYS:
+        kept = []
+        for it in columns[key]:
+            mark = _NOISE_RE.sub("", it["text"])
+            if mark not in seen:
+                seen.add(mark)
+                kept.append(it)
+        columns[key] = kept
+    checked = await _check_items(summarizer, columns, lines, before_call, tick)
     return {"columns": columns, "chunks": len(chunks), "degraded": failed > 0,
-            "dropped": dropped,
+            "dropped": dropped, "checked": checked,
             "generated_at": datetime.datetime.now().astimezone().isoformat()}
+
+
+def spread(items, limit: int) -> list:
+    """超過上限時平均取整場。直接截斷的話，後半場的內容會全部不見。"""
+    if len(items) <= limit:
+        return items
+    return [items[i * len(items) // limit] for i in range(limit)]
 
 
 async def _reduce(summarizer, title, desc, limit, items) -> list:
@@ -310,7 +522,7 @@ async def _reduce(summarizer, title, desc, limit, items) -> list:
         if text and ids:
             out.append({"text": text, "t": min(items[i - 1]["t"] for i in ids)})
     out.sort(key=lambda it: it["t"])
-    return out[:limit] or items[:limit]
+    return spread(out or items, limit)
 
 
 # ── 工作表名稱 ────────────────────────────────────────────────────────

@@ -1654,6 +1654,13 @@ function renderMeetingTab(p, d, id, player) {
     const name = head.querySelector('input');
     head.querySelector('label').htmlFor = name.id = 'm-sheet';
     name.value = notes.sheet_name || '';
+    const fixes = Object.entries((d.job || {}).auto_fixes || {});
+    if (fixes.length) {
+      const note = document.createElement('p');
+      note.className = 'hint';
+      note.textContent = '自動改正了聽錯的詞：' + fixes.map(([a, b]) => `${a} → ${b}`).join('、');
+      head.querySelector('.field').after(note);
+    }
     name.addEventListener('change', async () => {
       try {
         const r = await postJson(`/api/sessions/${id}/meeting-sheet`, { name: name.value });
@@ -2101,7 +2108,7 @@ function renderUpload() {
 function updateUploadForm() {
   $('up-speakers-field').hidden = $('up-course').value !== 'meeting';
   try {
-    const n = localStorage.getItem('nobook.upSpeakers');
+    const n = localStorage.getItem('nobook.upSpeakerCount');
     if (n !== null) $('up-speakers').value = n;
   } catch (e) { /* 用預設 */ }
 }
@@ -2184,11 +2191,11 @@ async function startUpload() {
   const opts = {
     course: $('up-course').value,
     speakers: Number($('up-speakers').value) || 0,
-    terms: $('up-terms').value,
+    terms: '',
   };
   try {
     localStorage.setItem('nobook.upCourse', opts.course);
-    localStorage.setItem('nobook.upSpeakers', String(opts.speakers));
+    localStorage.setItem('nobook.upSpeakerCount', String(opts.speakers));
   } catch (e) { /* 不影響上傳 */ }
   up.running = true;
   up.cancelled = false;

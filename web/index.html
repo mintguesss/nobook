@@ -748,25 +748,18 @@
         <div class="field" id="up-speakers-field">
           <label for="up-speakers">有幾個人講話？</label>
           <select id="up-speakers">
-            <option value="0">不確定，自動判斷</option>
+            <option value="0" selected>自動判斷</option>
             <option value="1">1 人</option>
             <option value="2">2 人</option>
-            <option value="3" selected>3 人</option>
+            <option value="3">3 人</option>
             <option value="4">4 人</option>
             <option value="5">5 人</option>
             <option value="6">6 人</option>
             <option value="7">7 人</option>
             <option value="8">8 人</option>
           </select>
-          <p class="hint">知道人數的話，誰講了哪句會分得比較準。</p>
+          <p class="hint">通常選自動就好。有人幾乎沒講話時，硬選人數反而會把同一個人拆成兩個。</p>
         </div>
-        <details class="adv">
-          <summary>常出現的人名或專有名詞（選填）</summary>
-          <div class="field">
-            <textarea id="up-terms" placeholder="王小明、負載卸載、生成式 AI"></textarea>
-            <p class="hint">用頓號分開，專有名詞會比較不容易聽錯。已經知道會錯成什麼的話，寫成「深層式=生成式」就會自動改掉。</p>
-          </div>
-        </details>
       </div>
 
       <button id="up-start" class="btn primary big" disabled>開始上傳</button>
@@ -868,6 +861,6 @@
 <!-- ?v= 是必要的：index.html 和 app.js 會被各自快取，版本對不上時
      畫面上看得到新按鈕、但監聽器在舊檔裡，按了完全沒反應。
      這個字串要跟 sw.js 的 VERSION 一致，selftest 會檢查。 -->
-<script src="app.js?v=v26"></script>
+<script src="app.js?v=v27"></script>
 </body>
 </html>

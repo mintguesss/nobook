@@ -756,6 +756,24 @@ def test_meeting_notes(gate):
     gate.check(mn.parse_ts("00:12:34", 0, 9999) == 754 and mn.parse_ts("99:00:00", 10, 20) == 10,
                "時間超出這一塊就退回開頭")
     gate.check(mn.clean_item("3. 教授建議：先畫架構圖") == "先畫架構圖", "拿掉模型自己編的號碼和開頭")
+    same = lambda a, b: 1.0
+    never = lambda a, b: 0.0
+    gate.check(mn.valid_fix("負債卸載", "負載卸載", "負債卸載和負載卸載", never), "正確的詞有出現過就接受")
+    gate.check(mn.valid_fix("顯微境", "顯微鏡", "顯微境" * 4, same), "三字以上同音的就算出現多次也接受")
+    gate.check(not mn.valid_fix("價值", "加值", "價值" * 12, same), "兩字同音又反覆出現的不改")
+    gate.check(not mn.valid_fix("顯微境", "顯微鏡", "顯微境", never), "讀音不像又沒出現過的不改")
+    gate.check(not mn.valid_fix("線性模型", "負載卸載", "線性模型和負載卸載", same), "完全沒有共同字的不改")
+    gate.check(not mn.valid_fix("短詞", "長一點的詞", "短詞", same), "字數不同的不改")
+    fixed = [{"id": 1, "text": "顯微境很貴"}, {"id": 2, "text": "沒有錯字"}]
+    gate.check(mn.apply_fixes(fixed, {"顯微境": "顯微鏡"}) == [("顯微鏡很貴", 1)]
+               and fixed[0]["text"] == "顯微鏡很貴", "只回報有改到的列")
+    gate.check([it["t"] for it in mn.spread([{"t": i} for i in range(10)], 5)] == [0, 2, 4, 6, 8],
+               "超過上限時前後半場都留")
+    gate.check(len(mn.dedupe_items([{"text": "先分類。", "t": 9}, {"text": "先分類", "t": 3}])) == 1,
+               "重複的筆記只留一則")
+    chunk = [(0, "[00:00:00] 講者1（教授）：教授的話"), (1, "[00:00:01] 講者2：" + "報告" * 80),
+             (2, "[00:00:02] 講者2：一定要做前測")]
+    gate.check(mn.support_lines(chunk) == [chunk[0][1], chunk[2][1]], "學生的長段報告不算依據，短句算")
     gate.check(mn.default_sheet_name("2026-11-04T10:00:00+08:00") == "116.11.4第四次",
                "工作表名稱照原本的寫法，次數接在手寫的三次之後")
     gate.check(mn.default_sheet_name("2026-11-06T10:00:00+08:00") == "116.11.4第四次",
