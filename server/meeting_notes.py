@@ -316,6 +316,12 @@ async def _reduce(summarizer, title, desc, limit, items) -> list:
 # ── 工作表名稱 ────────────────────────────────────────────────────────
 _CN_DIGITS = "零一二三四五六七八九"
 _NTH_RE = re.compile(r"第([零一二三四五六七八九十\d]+)次")
+# 跟使用者原本的表一樣的寫法：西元 2026 年寫成 116
+SHEET_YEAR_OFFSET = 1910
+# 每週三開會
+MEETING_WEEKDAY = 2
+# 進系統之前已經手寫了三次，次數從這之後接
+HANDWRITTEN_MEETINGS = 3
 
 
 def cn_number(n: int) -> str:
@@ -342,13 +348,14 @@ def parse_nth(name) -> int:
 
 
 def default_sheet_name(started_at: str, earlier_names=()) -> str:
-    """民國年.月.日第幾次。次數接著前面的紀錄算，使用者改過前一筆，後面就跟著對。"""
+    """年.月.日第幾次。日期推回當週的會議日，次數接著前面的紀錄算，使用者改過前一筆，後面就跟著對。"""
     try:
         d = datetime.datetime.fromisoformat(started_at)
     except (TypeError, ValueError):
         d = datetime.datetime.now()
-    nth = max([parse_nth(n) for n in earlier_names] or [0]) + 1
-    return "%d.%d.%d第%s次" % (d.year - 1911, d.month, d.day, cn_number(nth))
+    d -= datetime.timedelta(days=(d.weekday() - MEETING_WEEKDAY) % 7)
+    nth = max([parse_nth(n) for n in earlier_names] + [HANDWRITTEN_MEETINGS]) + 1
+    return "%d.%d.%d第%s次" % (d.year - SHEET_YEAR_OFFSET, d.month, d.day, cn_number(nth))
 
 
 _BAD_SHEET_RE = re.compile(r"[\[\]:*?/\\]")

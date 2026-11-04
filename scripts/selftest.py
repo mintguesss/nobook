@@ -745,10 +745,14 @@ def test_meeting_notes(gate):
     gate.check(mn.parse_ts("00:12:34", 0, 9999) == 754 and mn.parse_ts("99:00:00", 10, 20) == 10,
                "時間超出這一塊就退回開頭")
     gate.check(mn.clean_item("3. 教授建議：先畫架構圖") == "先畫架構圖", "拿掉模型自己編的號碼和開頭")
-    gate.check(mn.default_sheet_name("2026-11-04T10:00:00+08:00") == "115.11.4第一次",
-               "工作表名稱用民國年")
-    gate.check(mn.default_sheet_name("2026-11-04T10:00:00+08:00", ["116.10.14第三次"]) == "115.11.4第四次",
-               "次數接著前一筆")
+    gate.check(mn.default_sheet_name("2026-11-04T10:00:00+08:00") == "116.11.4第四次",
+               "工作表名稱照原本的寫法，次數接在手寫的三次之後")
+    gate.check(mn.default_sheet_name("2026-11-06T10:00:00+08:00") == "116.11.4第四次",
+               "不是週三的錄音推回當週三")
+    gate.check(mn.default_sheet_name("2026-11-03T10:00:00+08:00") == "116.10.28第四次",
+               "週三之前的錄音推回上週三")
+    gate.check(mn.default_sheet_name("2026-11-11T10:00:00+08:00", ["116.11.4第七次"]) == "116.11.11第八次",
+               "次數接著前一筆改過的名稱")
     gate.check([mn.parse_nth("第十二次"), mn.parse_nth("第二十次"), mn.cn_number(21)] == [12, 20, "二十一"],
                "第幾次的中文數字")
     gate.check(mn.clean_sheet_name("a/b:c" + "x" * 40) == ("a-b-c" + "x" * 40)[:31], "Excel 不接受的名稱會被修掉")

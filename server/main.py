@@ -176,7 +176,7 @@ async def api_meeting_notes(session_id: str):
 
 @app.post("/api/sessions/{session_id}/meeting-sheet")
 async def api_meeting_sheet(session_id: str, payload: dict = Body(...)):
-    """改工作表名稱，例如第幾次、民國年。"""
+    """改工作表名稱，例如第幾次、日期。"""
     s = storage.get_session(session_id)
     notes = meeting_notes.load(s) if s else None
     if not notes:
