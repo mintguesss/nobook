@@ -18,7 +18,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import (audio_store, config, courses, diarize, meeting, meeting_notes, storage,
+from . import (audio_store, config, courses, diarize, meeting, meeting_notes, punctuate, storage,
                term_fix, ws_session)
 from .asr import ASRVramLow
 from .llm_manager import LLMUnavailable
@@ -320,6 +320,8 @@ async def _run_job(session_id: str) -> None:
             _update(session_id, job, progress=round(i / max(1, len(segments)), 3))
 
     rows = meeting.merge_rows(rows)
+    if job.get("diarize") and punctuate.available():
+        await asyncio.to_thread(punctuate.punctuate_rows, rows)
     storage.replace_segments(session_id, rows)
     speakers = sorted({r["speaker"] for r in rows if r["speaker"]})
     _update(session_id, job, status="done", stage="done", progress=1,

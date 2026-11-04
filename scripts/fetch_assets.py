@@ -151,15 +151,40 @@ def fetch_diarize() -> bool:
     return True
 
 
+def fetch_punctuation() -> bool:
+    import tarfile
+    from server.punctuate import MODEL, MODEL_DIR, MODEL_NAME, MODEL_URL
+    header("標點模型：%s" % MODEL_NAME)
+    if MODEL.exists():
+        print("  已存在，略過")
+        return True
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    archive = MODEL_DIR / (MODEL_NAME + ".tar.bz2")
+    try:
+        _download(MODEL_URL, archive)
+        with tarfile.open(archive) as tar:
+            for name in ("model.onnx", "tokens.json"):
+                src = tar.extractfile("%s/%s" % (MODEL_NAME, name))
+                with (MODEL_DIR / name).open("wb") as out:
+                    shutil.copyfileobj(src, out)
+    except Exception as e:
+        print("  FAIL：%s" % e)
+        return False
+    finally:
+        archive.unlink(missing_ok=True)
+    print("  OK  %.0f MB" % _mb(MODEL))
+    return True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("what", nargs="*", default=None,
-                    choices=["asr", "llama", "gguf", "diarize"],
+                    choices=["asr", "llama", "gguf", "diarize", "punctuation"],
                     help="不指定就全部抓")
     ap.add_argument("--only", default="",
                     help="gguf 專用，逗號分隔：4b,8b,1.7b,4b0")
     args = ap.parse_args()
-    what = args.what or ["asr", "llama", "gguf", "diarize"]
+    what = args.what or ["asr", "llama", "gguf", "diarize", "punctuation"]
     only = {s.strip() for s in args.only.split(",") if s.strip()} or None
 
     results = {}
@@ -171,6 +196,8 @@ def main() -> int:
         results["gguf"] = fetch_gguf(only)
     if "diarize" in what:
         results["diarize"] = fetch_diarize()
+    if "punctuation" in what:
+        results["punctuation"] = fetch_punctuation()
 
     header("下載結果")
     for k, v in results.items():

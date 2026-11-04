@@ -1510,7 +1510,7 @@ function renderJobCard(body, d) {
   const j = d.job;
   const c = infoCard('', jobLabel(j), j.stage === 'waiting_live'
     ? '有人正在現場錄音，等錄音結束會自動繼續。'
-    : '在伺服器上處理，可以關掉這個畫面。一小時的錄音大約要 6 分鐘，會議錄音轉完會接著整理。');
+    : '在伺服器上處理，可以關掉這個畫面。一小時的會議錄音大約要 10 到 20 分鐘，轉完會接著整理。');
   c.classList.add('d-block');
   const pct = j.stage === 'transcribing' ? (j.progress || 0) : 0;
   const track = document.createElement('div');
@@ -1796,7 +1796,7 @@ function renderTranscriptTab(p, d, id, courseName, player) {
     again.addEventListener('click', async () => {
       const v = await ask({
         title: '這段錄音有幾個人講話？',
-        message: '會用保存的錄音重新轉一次，一小時大約要 6 分鐘。已取的名字要重新對照。',
+        message: '會用保存的錄音重新轉一次，一小時大約要 10 到 20 分鐘。已取的名字要重新對照。',
         select: {
           value: d.job.speakers || 0,
           options: [[0, '不確定，自動判斷'], ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => [n, `${n} 人`])],

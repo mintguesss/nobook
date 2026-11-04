@@ -720,6 +720,17 @@ def test_uploads(gate):
         asyncio.run(scenario(tmp))
 
 
+def test_punctuate(gate):
+    from server import punctuate as pn
+    gate.check(pn.transfer_marks("負載卸載很重要 AI 也是", "负载卸载很重要，AI也是。") == "負載卸載很重要，AI 也是。",
+               "標點放回繁體原文，字不動")
+    gate.check(pn.transfer_marks("甲乙丙", "甲乙，丙丁。") == "甲乙丙", "字數對不起來就不動原文")
+    rows = [{"text": "先分類", "speaker": 1}, {"text": "再細讀", "speaker": 1}, {"text": "好的", "speaker": 2}]
+    pn.apply_to_rows(rows, lambda t: t + "。")
+    gate.check([r["text"] for r in rows] == ["先分類", "再細讀。", "好的。"],
+               "同一人接著講的句尾不收句號")
+
+
 def test_meeting_notes(gate):
     import io
     from server import meeting_notes as mn
@@ -882,6 +893,7 @@ def main() -> int:
     print("\n[ASR 後處理 §4.4]")
     test_postprocess(gate)
     test_uploads(gate)
+    test_punctuate(gate)
     test_meeting_notes(gate)
     test_term_fix(gate)
     test_diarize(gate)

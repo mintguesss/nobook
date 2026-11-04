@@ -148,7 +148,7 @@ def transcript_lines(segments, names=None) -> list:
     out = []
     for g in segments:
         text = (g.get("text") or "").strip()
-        if len(text) < MIN_LINE_CHARS:
+        if len(_NOISE_RE.sub("", text)) < MIN_LINE_CHARS:
             continue
         spk = g.get("speaker")
         who = (names.get(str(spk)) or "講者%s" % spk) if spk else "講者?"
