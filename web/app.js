@@ -823,6 +823,7 @@ function jobOf(r) {
   try { return JSON.parse(r.job || 'null') || {}; } catch (e) { return {}; }
 }
 const jobBusy = (j) => j.status === 'queued' || j.status === 'running';
+const notesBusy = (j) => j.notes_status === 'queued' || j.notes_status === 'running';
 
 const STAGE_TEXT = {
   queued: '排隊中',
@@ -911,6 +912,13 @@ function historyRow(r, courseName, showCourse) {
     '<span class="hmain"><span class="hname"></span><span class="hmeta"></span></span>' +
     '<span class="hbadge"></span>';
   btn.querySelector('.hname').textContent = r.note || rowDate(r);
+  const when = new Date(r.started_at);
+  const tile = document.createElement('span');
+  tile.className = 'htile' + (r.course_id === 'meeting' ? ' meeting' : '');
+  tile.innerHTML = '<b></b><small></small>';
+  tile.firstChild.textContent = when.getDate();
+  tile.lastChild.textContent = `${when.getMonth() + 1} 月`;
+  btn.insertBefore(tile, btn.querySelector('.hmain'));
   const bits = [];
   if (r.note) bits.push(rowDate(r));
   if (showCourse) bits.push(courseName);
@@ -924,6 +932,10 @@ function historyRow(r, courseName, showCourse) {
   const badge = btn.querySelector('.hbadge');
   if (live) { badge.textContent = '錄音中'; badge.classList.add('busy'); }
   else if (jobBusy(job)) { badge.textContent = jobLabel(job); badge.classList.add('busy'); }
+  else if (notesBusy(job)) {
+    badge.textContent = `整理中 ${Math.round((job.notes_progress || 0) * 100)}%`;
+    badge.classList.add('busy');
+  }
   else if (job.status === 'failed') { badge.textContent = '失敗'; badge.classList.add('fail'); }
   else if (!r.ended_at) { badge.textContent = '未完成'; badge.classList.add('todo'); }
   else badge.hidden = true;
@@ -967,7 +979,7 @@ async function renderRecent() {
 let jobPollTimer = null;
 function scheduleJobPoll(rows) {
   clearTimeout(jobPollTimer);
-  if (!rows.some((r) => jobBusy(jobOf(r)))) return;
+  if (!rows.some((r) => jobBusy(jobOf(r)) || notesBusy(jobOf(r)))) return;
   jobPollTimer = setTimeout(() => {
     if (document.visibilityState === 'hidden') { scheduleJobPoll(rows); return; }
     if (el.detail.classList.contains('show')) { scheduleJobPoll(rows); return; }
@@ -1367,7 +1379,7 @@ async function openDetail(id, courseName, keepTab) {
   }
   if (d.job.status === 'failed') renderFailedCard(body, d, id, courseName);
   if (!s.ended_at && d.job.status !== 'failed') renderUnfinishedCard(body, d, id, courseName);
-  if (d.job.notes_error) {
+  if (d.job.notes_error && s.course_id !== 'meeting') {
     body.appendChild(infoCard('warn', '逐字稿好了，但筆記沒有產生', d.job.notes_error));
   }
   if (d.job.empty) {
@@ -1426,6 +1438,9 @@ async function openDetail(id, courseName, keepTab) {
     }
   };
 
+  if (s.course_id === 'meeting' && d.segments.length) {
+    renderMeetingTab(addTab('meeting', '會議記錄'), d, id, player);
+  }
   const hc = s.handcopy_md;
   const fm = s.final_md;
   if (hc || fm) renderNotesTab(addTab('notes', '筆記'), id, hc, fm);
@@ -1460,7 +1475,7 @@ async function openDetail(id, courseName, keepTab) {
   } catch (e) { /* 拿不到教材清單就不顯示這一頁 */ }
 
   const wanted = prevTab && panels.has(prevTab) ? prevTab
-    : (panels.has('notes') ? 'notes' : 'transcript');
+    : (panels.has('meeting') ? 'meeting' : panels.has('notes') ? 'notes' : 'transcript');
   selectTab(wanted);
 
   $('detail-delete').onclick = async () => {
@@ -1495,7 +1510,7 @@ function renderJobCard(body, d) {
   const j = d.job;
   const c = infoCard('', jobLabel(j), j.stage === 'waiting_live'
     ? '有人正在現場錄音，等錄音結束會自動繼續。'
-    : '在伺服器上處理，可以關掉這個畫面。一小時的錄音大約要 6 分鐘。');
+    : '在伺服器上處理，可以關掉這個畫面。一小時的錄音大約要 6 分鐘，會議錄音轉完會接著整理。');
   c.classList.add('d-block');
   const pct = j.stage === 'transcribing' ? (j.progress || 0) : 0;
   const track = document.createElement('div');
@@ -1562,6 +1577,164 @@ function renderUnfinishedCard(body, d, id, courseName) {
   });
   bar.appendChild(b);
   body.appendChild(c);
+}
+
+// 跟下載的 Excel 同樣五欄，順序也一樣，對照起來才不會亂
+const MEETING_COLUMNS = [
+  ['literature', '文獻整理重點', 'var(--spk-1)'],
+  ['topic', '題目整理建議', 'var(--spk-2)'],
+  ['next', '下次目標', 'var(--spk-4)'],
+  ['ideas', '可用觀點記錄', 'var(--spk-3)'],
+  ['misc', '小事記錄', 'var(--spk-5)'],
+];
+
+function renderMeetingTab(p, d, id, player) {
+  let job = d.job;
+  let notes = null;
+  try { notes = JSON.parse(d.session.meeting_notes || 'null'); } catch (e) { notes = null; }
+
+  const request = async (btn) => {
+    btn.disabled = true;
+    try {
+      await postJson(`/api/sessions/${id}/meeting-notes`);
+      job = { ...job, notes_status: 'queued', notes_progress: 0, notes_error: null };
+      paint();
+    } catch (e) { toast('無法開始：' + e.message); btn.disabled = false; }
+  };
+  const poll = () => {
+    clearTimeout(detailPoll);
+    detailPoll = setTimeout(async () => {
+      if (state.detailId !== id) return;
+      try {
+        const fresh = await fetchJson(`/api/sessions/${id}`);
+        if (state.detailId !== id) return;
+        job = jobOf(fresh.session);
+        try { notes = JSON.parse(fresh.session.meeting_notes || 'null'); } catch (e) { notes = null; }
+        paint();
+      } catch (e) { poll(); }
+    }, 3000);
+  };
+
+  function paint() {
+    p.innerHTML = '';
+    if (notesBusy(job)) {
+      const c = infoCard('', `正在整理會議記錄 ${Math.round((job.notes_progress || 0) * 100)}%`,
+        '大約一兩分鐘，可以先看逐字稿，也可以關掉這個畫面。');
+      const track = document.createElement('div');
+      track.className = 'bar-track';
+      track.innerHTML = '<div class="bar-fill"></div>';
+      track.firstChild.style.width = `${Math.max(3, (job.notes_progress || 0) * 100)}%`;
+      c.appendChild(track);
+      p.appendChild(c);
+      poll();
+    } else if (job.notes_error) {
+      const c = infoCard('warn', '這次沒有整理成功', job.notes_error);
+      const b = document.createElement('button');
+      b.className = 'btn';
+      b.textContent = '再試一次';
+      b.addEventListener('click', () => request(b));
+      c.appendChild(b);
+      p.appendChild(c);
+    }
+    if (!notes) {
+      if (!notesBusy(job) && !job.notes_error) {
+        const c = infoCard('', '還沒有會議記錄', '用這份逐字稿整理成五欄的會議記錄，大約一兩分鐘。');
+        const b = document.createElement('button');
+        b.className = 'btn primary';
+        b.textContent = '開始整理';
+        b.addEventListener('click', () => request(b));
+        c.appendChild(b);
+        p.appendChild(c);
+      }
+      return;
+    }
+    const head = document.createElement('div');
+    head.className = 'card m-head';
+    head.innerHTML = '<div class="field"><label>Excel 工作表名稱</label><input type="text" maxlength="31"></div><div class="btns"></div>';
+    const name = head.querySelector('input');
+    head.querySelector('label').htmlFor = name.id = 'm-sheet';
+    name.value = notes.sheet_name || '';
+    name.addEventListener('change', async () => {
+      try {
+        const r = await postJson(`/api/sessions/${id}/meeting-sheet`, { name: name.value });
+        notes.sheet_name = name.value = r.name;
+        toast('名稱已存');
+      } catch (e) { toast('儲存失敗：' + e.message); name.value = notes.sheet_name || ''; }
+    });
+    const btns = head.querySelector('.btns');
+    const main = document.createElement('button');
+    main.className = 'btn primary';
+    main.textContent = '下載 Excel';
+    main.addEventListener('click', () => openFile(`/api/sessions/${id}/meeting-notes.xlsx`));
+    btns.appendChild(main);
+    const all = document.createElement('button');
+    all.className = 'btn';
+    all.textContent = '全部會議合成一檔';
+    all.addEventListener('click', () => openFile('/api/meeting-notes.xlsx'));
+    btns.appendChild(all);
+    p.appendChild(head);
+
+    const cols = document.createElement('div');
+    cols.className = 'm-cols';
+    for (const [key, title, color] of MEETING_COLUMNS) {
+      const items = (notes.columns && notes.columns[key]) || [];
+      const c = document.createElement('section');
+      c.className = 'mcol';
+      c.style.setProperty('--c', color);
+      const h = document.createElement('h3');
+      h.textContent = title;
+      if (items.length) {
+        const n = document.createElement('small');
+        n.textContent = `${items.length} 則`;
+        h.appendChild(n);
+      }
+      c.appendChild(h);
+      if (!items.length) {
+        const none = document.createElement('p');
+        none.className = 'none';
+        none.textContent = '這次沒有';
+        c.appendChild(none);
+      } else {
+        const ol = document.createElement('ol');
+        for (const it of items) {
+          const li = document.createElement('li');
+          const text = document.createElement('span');
+          text.textContent = it.text;
+          li.appendChild(text);
+          const t = document.createElement('button');
+          t.className = 'mt' + (player ? ' can' : '');
+          t.textContent = fmt(it.t);
+          if (player) {
+            t.setAttribute('aria-label', `聽 ${fmt(it.t)} 的原音`);
+            t.addEventListener('click', () => seekAudio(player, it.t));
+          } else t.disabled = true;
+          li.appendChild(t);
+          ol.appendChild(li);
+        }
+        c.appendChild(ol);
+      }
+      cols.appendChild(c);
+    }
+    p.appendChild(cols);
+
+    const foot = document.createElement('p');
+    foot.className = 'hint m-foot';
+    foot.textContent = notes.degraded
+      ? '有一段沒有整理成功，內容可能缺一部分，可以按重新整理。'
+      : '這是 AI 從逐字稿整理的，交出去前請看過一次。點時間可以聽那段原音。';
+    p.appendChild(foot);
+    if (!notesBusy(job)) {
+      const again = document.createElement('button');
+      again.className = 'link';
+      again.textContent = '重新整理';
+      again.addEventListener('click', async () => {
+        if (!await ask({ title: '重新整理這份會議記錄？', message: '會用逐字稿重新產生，結果會取代目前的內容。', ok: '重新整理' })) return;
+        request(again);
+      });
+      p.appendChild(again);
+    }
+  }
+  paint();
 }
 
 function renderTranscriptTab(p, d, id, courseName, player) {
@@ -1796,9 +1969,12 @@ function closeDetail() {
   else if (!el.overlay.classList.contains('hide')) renderRecent();
 }
 
-// iPhone 主畫面版開附件會蓋掉整個 App 而且回不來，要開到外部 Safari
 function dl(id, format, which) {
-  const url = `/api/sessions/${id}/export?format=${format}&which=${which}`;
+  openFile(`/api/sessions/${id}/export?format=${format}&which=${which}`);
+}
+
+// iPhone 主畫面版開附件會蓋掉整個 App 而且回不來，要開到外部 Safari
+function openFile(url) {
   if (navigator.standalone) { window.open(url, '_blank'); return; }
   const a = document.createElement('a');
   a.href = url;
@@ -1924,6 +2100,10 @@ function renderUpload() {
 
 function updateUploadForm() {
   $('up-speakers-field').hidden = $('up-course').value !== 'meeting';
+  try {
+    const n = localStorage.getItem('nobook.upSpeakers');
+    if (n !== null) $('up-speakers').value = n;
+  } catch (e) { /* 用預設 */ }
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -2006,7 +2186,10 @@ async function startUpload() {
     speakers: Number($('up-speakers').value) || 0,
     terms: $('up-terms').value,
   };
-  try { localStorage.setItem('nobook.upCourse', opts.course); } catch (e) { /* 不影響上傳 */ }
+  try {
+    localStorage.setItem('nobook.upCourse', opts.course);
+    localStorage.setItem('nobook.upSpeakers', String(opts.speakers));
+  } catch (e) { /* 不影響上傳 */ }
   up.running = true;
   up.cancelled = false;
   acquireWakeLock(true);
@@ -2065,7 +2248,9 @@ $('up-done-home').addEventListener('click', () => {
   renderRecent();
 });
 $('up-file').addEventListener('change', (e) => { addFiles(e.target.files); e.target.value = ''; });
-$('up-course').addEventListener('change', updateUploadForm);
+$('up-course').addEventListener('change', () => {
+  $('up-speakers-field').hidden = $('up-course').value !== 'meeting';
+});
 $('up-start').addEventListener('click', startUpload);
 {
   const drop = $('drop');
@@ -2110,6 +2295,45 @@ $('select-delete').addEventListener('click', deleteSelected);
     timer = setTimeout(renderHistory, 200);
   });
 }
+
+// ── 封面與外觀 ────────────────────────────────────────────────────────
+const WAVE = [14, 26, 40, 30, 58, 82, 60, 96, 128, 92, 150, 118, 76, 132, 100, 62, 88, 50, 72, 36, 48, 24, 32, 14];
+$('c-wave').innerHTML = WAVE.map((h, i) => `<i style="--h:${h}px;--d:${(i * 0.09).toFixed(2)}s"></i>`).join('');
+$('a-deco').innerHTML = [18, 36, 58, 30, 66, 44, 24, 12].map((h) => `<i style="--h:${h}px"></i>`).join('');
+
+// 重新載入（換版、接回錄音）不用再看一次封面，只有真的重新打開才顯示
+function showCover() {
+  const cover = $('cover');
+  let seen = false;
+  try { seen = sessionStorage.getItem('nobook.cover') === '1' || !!recallSession(); } catch (e) { /* 當作沒看過 */ }
+  if (seen) return;
+  cover.hidden = false;
+  const enter = () => {
+    if (cover.classList.contains('leaving')) return;
+    try { sessionStorage.setItem('nobook.cover', '1'); } catch (e) { /* 下次再看一次而已 */ }
+    cover.classList.add('leaving');
+    setTimeout(() => { cover.hidden = true; }, 400);
+  };
+  cover.addEventListener('click', enter);
+  cover.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') enter(); });
+}
+
+const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/></svg>';
+const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></svg>';
+function paintTheme() {
+  const light = document.documentElement.dataset.theme === 'light';
+  $('theme-toggle').innerHTML = light ? MOON : SUN;
+  document.querySelector('meta[name="theme-color"]').content = light ? '#f6f3ec' : '#0b0d10';
+}
+$('theme-toggle').addEventListener('click', () => {
+  const light = document.documentElement.dataset.theme !== 'light';
+  if (light) document.documentElement.dataset.theme = 'light';
+  else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem('nobook.theme', light ? 'light' : 'dark'); } catch (e) { /* 這次有效就好 */ }
+  paintTheme();
+});
+paintTheme();
+showCover();
 
 // ── 啟動 ──────────────────────────────────────────────────────────────
 async function loadCourses() {

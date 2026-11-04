@@ -3,58 +3,64 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f6f3">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14171b">
+<meta name="theme-color" content="#0b0d10">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="nobook">
 <title>nobook</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <!-- iOS 的主畫面圖示不吃 SVG -->
 <link rel="apple-touch-icon" href="icon-180.png">
+<script>try { if (localStorage.getItem('nobook.theme') === 'light') document.documentElement.dataset.theme = 'light'; } catch (e) { }</script>
 <style>
   :root {
-    color-scheme: light dark;
-    --bg: #f6f6f3;
-    --panel: #ffffff;
-    --panel-2: #eeeeea;
-    --line: #dddcd6;
-    --fg: #1d2023;
-    --fg-dim: #63686e;
-    --accent: #0f6e6a;
-    --accent-fg: #ffffff;
-    --accent-soft: rgba(15, 110, 106, .11);
+    color-scheme: dark;
+    --bg: #0b0d10;
+    --panel: #15181e;
+    --panel-2: #20242c;
+    --line: #2b3039;
+    --fg: #f2f0ea;
+    --fg-dim: #98a1ac;
+    --accent: #f2b25c;
+    --accent-2: #e8923f;
+    --accent-fg: #241603;
+    --accent-soft: rgba(242, 178, 92, .14);
+    --glow: rgba(242, 178, 92, .13);
+    --ok: #6fd29a;
+    --warn: #ffd27a;
+    --warn-soft: rgba(255, 210, 122, .11);
+    --bad: #ff8d7d;
+    --bad-soft: rgba(255, 141, 125, .12);
+    --shadow: 0 14px 40px rgba(0, 0, 0, .5);
+    --bar-bg: rgba(11, 13, 16, .78);
+    --spk-1: #f2b25c; --spk-2: #6fcfc3; --spk-3: #b6aaf7;
+    --spk-4: #f293b4; --spk-5: #82b9f2; --spk-6: #a9d87e;
+    --radius: 18px;
+    --serif: ui-serif, "Songti TC", "Noto Serif TC", "Noto Serif CJK TC", Georgia, serif;
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f6f3ec;
+    --panel: #fffdf8;
+    --panel-2: #ece8de;
+    --line: #dcd6c9;
+    --fg: #1f1d19;
+    --fg-dim: #6d6a62;
+    --accent: #a9630f;
+    --accent-2: #8c4f08;
+    --accent-fg: #fffaf2;
+    --accent-soft: rgba(169, 99, 15, .12);
+    --glow: rgba(214, 141, 45, .16);
     --ok: #1c8450;
-    --warn: #96650a;
+    --warn: #8a5c06;
     --warn-soft: rgba(176, 121, 16, .12);
     --bad: #bf3528;
     --bad-soft: rgba(191, 53, 40, .1);
-    --shadow: 0 8px 26px rgba(30, 30, 25, .13);
-    --spk-1: #0f6e6a; --spk-2: #a4502c; --spk-3: #5a55b0;
-    --spk-4: #8a6a00; --spk-5: #a23d78; --spk-6: #2f6da8;
-    --radius: 14px;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #14171b;
-      --panel: #1c2026;
-      --panel-2: #262b32;
-      --line: #333942;
-      --fg: #e9ecef;
-      --fg-dim: #9aa3ad;
-      --accent: #58c2b8;
-      --accent-fg: #06201e;
-      --accent-soft: rgba(88, 194, 184, .14);
-      --ok: #5bc98b;
-      --warn: #e2b34f;
-      --warn-soft: rgba(226, 179, 79, .13);
-      --bad: #ef7d70;
-      --bad-soft: rgba(239, 125, 112, .13);
-      --shadow: 0 10px 30px rgba(0, 0, 0, .45);
-      --spk-1: #58c2b8; --spk-2: #e8996f; --spk-3: #a7a3f0;
-      --spk-4: #d9b84f; --spk-5: #e58cc0; --spk-6: #7fb4e6;
-    }
+    --shadow: 0 10px 28px rgba(50, 40, 20, .14);
+    --bar-bg: rgba(246, 243, 236, .82);
+    --spk-1: #a9630f; --spk-2: #0f7a70; --spk-3: #5a4fc0;
+    --spk-4: #b53a70; --spk-5: #2f6da8; --spk-6: #4f7a1f;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
@@ -454,9 +460,184 @@
   dialog .field { margin-bottom: 14px; }
   dialog .btns { justify-content: flex-end; }
   dialog .btns .btn { flex: 0 1 auto; min-width: 88px; }
+
+  /* 封面 ------------------------------------------------------------- */
+  #cover {
+    position: fixed; inset: 0; z-index: 80; display: flex; flex-direction: column;
+    justify-content: center; align-items: center; text-align: center; cursor: pointer;
+    padding: calc(24px + env(safe-area-inset-top)) 28px calc(30px + env(safe-area-inset-bottom));
+    background: radial-gradient(90% 55% at 50% 38%, var(--glow), transparent 70%), var(--bg);
+    transition: opacity .38s ease, transform .38s ease;
+  }
+  #cover.leaving { opacity: 0; transform: scale(1.04); pointer-events: none; }
+  .c-wave {
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    height: 150px; width: 100%; max-width: 420px; margin-bottom: 30px;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+            mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+  }
+  .c-wave i {
+    flex: 1 1 0; max-width: 7px; height: var(--h); border-radius: 9px;
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
+    animation: breathe 2.2s ease-in-out infinite; animation-delay: var(--d);
+    transform-origin: center;
+  }
+  @keyframes breathe { 0%, 100% { transform: scaleY(.42); opacity: .55; } 50% { transform: scaleY(1); opacity: 1; } }
+  .c-word {
+    margin: 0; font: 500 clamp(54px, 17vw, 84px)/1.05 var(--serif); letter-spacing: -.02em;
+    animation: rise .8s ease-out both;
+  }
+  .c-tag {
+    margin: 12px 0 0; color: var(--fg-dim); font: 400 17px/1.6 var(--serif); letter-spacing: .08em;
+    animation: rise .8s .15s ease-out both;
+  }
+  .c-enter {
+    margin-top: 44px; min-width: 164px; min-height: 52px; padding: 10px 30px; border: none;
+    border-radius: 99px; color: var(--accent-fg); font-size: 17px; font-weight: 700; letter-spacing: .12em;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 10px 34px var(--glow); animation: rise .8s .3s ease-out both;
+  }
+  .c-foot {
+    position: absolute; left: 0; right: 0; bottom: calc(22px + env(safe-area-inset-bottom));
+    color: var(--fg-dim); font-size: 12px; letter-spacing: .24em; animation: rise .8s .45s ease-out both;
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(12px); } }
+
+  /* 整體質感 --------------------------------------------------------- */
+  .screen.show, #overlay:not(.hide) { animation: screen-in .22s ease-out; }
+  #cover ~ #overlay { animation: none; }
+  @keyframes screen-in { from { opacity: 0; transform: translateY(8px); } }
+  #overlay { background: radial-gradient(120% 46% at 88% -6%, var(--glow), transparent 65%), var(--bg); }
+  .bar {
+    background: var(--bar-bg); border-bottom-color: var(--line);
+    -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4);
+  }
+  .btn { border-radius: 13px; background: var(--panel-2); border-color: transparent; font-weight: 600; transition: transform .08s; }
+  .btn:active { transform: scale(.975); background: var(--line); }
+  .btn.primary, .btn.primary:active { background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: transparent; }
+  .card { border-color: var(--line); }
+  select, input[type=text], input[type=search], textarea { background: var(--panel-2); border-color: transparent; border-radius: 12px; }
+  select {
+    -webkit-appearance: none; appearance: none; padding-right: 38px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%2398a1ac' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 14px center; background-size: 12px 8px;
+  }
+  select:focus, input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+  dialog { border: 1px solid var(--line); border-radius: 20px; }
+  dialog::backdrop { background: rgba(0, 0, 0, .62); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+
+  /* 首頁 */
+  .topline { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 26px; }
+  .wordmark { display: flex; align-items: center; gap: 9px; font: 500 21px/1 var(--serif); letter-spacing: -.01em; }
+  .wordmark img { width: 28px; height: 28px; border-radius: 8px; }
+  .icon-btn {
+    width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%;
+    background: var(--panel); border: 1px solid var(--line); color: var(--fg-dim);
+  }
+  .icon-btn svg { width: 19px; height: 19px; }
+  .hero { margin: 0 0 20px; font: 500 clamp(29px, 8vw, 38px)/1.25 var(--serif); letter-spacing: -.01em; }
+  .hero em { font-style: normal; color: var(--accent); }
+  .actions { gap: 12px; margin-bottom: 32px; }
+  .action {
+    position: relative; overflow: hidden; border-radius: 22px; min-height: 96px; padding: 18px;
+    background: var(--panel); transition: transform .1s;
+  }
+  .action:active { transform: scale(.98); }
+  .action .aicon {
+    flex: none; width: 48px; height: 48px; border-radius: 15px; display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent);
+  }
+  .action svg { width: 25px; height: 25px; }
+  .action.primary { min-height: 150px; align-items: flex-end; background: linear-gradient(135deg, var(--accent), var(--accent-2)); border: none; }
+  .action.primary:active { opacity: 1; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  .action.primary .aicon { background: rgba(36, 22, 3, .14); color: var(--accent-fg); }
+  .action.primary b { font-size: 22px; }
+  .action > span:not(.aicon):not(.adeco) { position: relative; }
+  .adeco { position: absolute; top: 18px; right: 16px; display: flex; align-items: center; gap: 4px; height: 66px; opacity: .3; }
+  .adeco i { width: 5px; height: var(--h); border-radius: 9px; background: var(--accent-fg); }
+  @media (min-width: 560px) { .action, .action.primary { min-height: 150px; align-items: flex-end; } }
+  .sechead-row h2 { font: 500 19px/1.3 var(--serif); color: var(--fg); }
+
+  /* 紀錄清單 */
+  .rows { background: none; border: none; border-radius: 0; overflow: visible; display: grid; gap: 8px; }
+  .rows .hitem { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .rows .hitem + .hitem { border-top: 1px solid var(--line); }
+  .hrow { min-height: 70px; }
+  .htile {
+    flex: none; width: 46px; height: 46px; border-radius: 13px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; background: var(--panel-2); color: var(--fg-dim); line-height: 1.1;
+  }
+  .htile b { font: 600 18px/1 var(--serif); color: var(--fg); }
+  .htile small { font-size: 10px; margin-top: 2px; }
+  .htile.meeting { background: var(--accent-soft); color: var(--accent); }
+  .htile.meeting b { color: var(--accent); }
+  .cfold { border-radius: 16px; }
+  .hbadge.done { background: var(--accent-soft); color: var(--accent); }
+
+  /* 上傳 */
+  .drop {
+    min-height: 170px; border: 1.5px dashed var(--line); border-radius: 22px; position: relative;
+    background: radial-gradient(80% 90% at 50% 0%, var(--accent-soft), transparent 75%), var(--panel);
+  }
+  .drop b { font: 500 21px/1.3 var(--serif); color: var(--fg); }
+  .drop .dicon { width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); margin-bottom: 8px; }
+  .drop .dicon svg { width: 26px; height: 26px; }
+
+  /* 詳細頁 */
+  .d-name { font: 500 25px/1.3 var(--serif) !important; }
+  .tabs {
+    gap: 3px; padding: 4px; background: var(--panel-2); border: none; border-radius: 14px; margin-bottom: 18px;
+  }
+  .tab { flex: 1 0 auto; min-height: 38px; padding: 6px 14px; border: none; border-radius: 10px; margin: 0; font-size: 14px; }
+  .tab.on { background: var(--fg); color: var(--bg); border: none; }
+  .tab.on .n { opacity: .65; }
+  .seg-toggle button.on { background: var(--fg); color: var(--bg); }
+  .player { background: linear-gradient(var(--bg) 82%, transparent); }
+  .ln { padding: 8px 0; }
+  .ln .who { font-size: 13px; letter-spacing: .02em; }
+  .chip { background: var(--panel-2); border-color: transparent; }
+  .md h2 { font: 500 19px/1.4 var(--serif); }
+  .md h1 { font: 500 23px/1.35 var(--serif); }
+
+  /* 會議記錄 */
+  .m-head { display: grid; gap: 12px; padding: 16px; margin-bottom: 14px; border-radius: 20px;
+    background: radial-gradient(90% 120% at 100% 0%, var(--accent-soft), transparent 70%), var(--panel); }
+  .m-head .field { margin: 0; }
+  .m-head label { font-size: 13px !important; color: var(--fg-dim); font-weight: 500 !important; }
+  .m-cols { display: grid; gap: 12px; grid-template-columns: 1fr; }
+  @media (min-width: 900px) { #detail .wrap { max-width: 1040px; } .m-cols { grid-template-columns: 1fr 1fr; } }
+  .mcol { padding: 16px 16px 10px; border-radius: 20px; background: var(--panel); border: 1px solid var(--line); }
+  .mcol h3 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font: 500 18px/1.35 var(--serif); }
+  .mcol h3 small { color: var(--fg-dim); font: 400 12px/1 -apple-system, system-ui, sans-serif; }
+  .mcol h3::before { content: ''; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--accent)); flex: none; }
+  .mcol ol { margin: 0; padding: 0; list-style: none; counter-reset: m; }
+  .mcol li { counter-increment: m; display: flex; gap: 9px; padding: 8px 0; align-items: baseline; font-size: 15px; line-height: 1.6; border-top: 1px solid var(--line); }
+  .mcol li:first-child { border-top: none; }
+  .mcol li::before { content: counter(m); flex: none; width: 18px; color: var(--fg-dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .mcol li span { flex: 1; min-width: 0; }
+  .mcol .mt {
+    flex: none; min-height: 28px; padding: 1px 8px; border: none; border-radius: 8px; background: var(--panel-2);
+    color: var(--fg-dim); font-size: 11px; font-variant-numeric: tabular-nums;
+  }
+  .mcol .mt.can { color: var(--accent); }
+  .mcol .none { color: var(--fg-dim); font-size: 14px; padding: 2px 0 8px; margin: 0; }
+  .m-foot { margin: 14px 2px 0; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  }
 </style>
 </head>
 <body>
+
+<!-- 封面：每次打開 App 時顯示一次 -->
+<div id="cover" role="button" tabindex="0" aria-label="進入 nobook" hidden>
+  <div class="c-wave" id="c-wave" aria-hidden="true"></div>
+  <h1 class="c-word">nobook</h1>
+  <p class="c-tag">把筆記本闔上，專心聽就好。</p>
+  <button class="c-enter" tabindex="-1">進入</button>
+  <div class="c-foot">錄音 · 逐字稿 · 會議記錄</div>
+</div>
 
 <!-- 現場錄音：錄音中才看得到，其餘時候都被首頁蓋住 -->
 <header id="live-head">
@@ -503,10 +684,11 @@
 <div id="overlay" class="screen show">
   <div class="scroll">
     <div class="wrap">
-      <div class="brand">
-        <img src="icon.svg" alt="">
-        <div><h1>nobook</h1><p>把錄音變成逐字稿和筆記</p></div>
+      <div class="topline">
+        <div class="wordmark"><img src="icon.svg" alt="">nobook</div>
+        <button id="theme-toggle" class="icon-btn" aria-label="切換深色或淺色"></button>
       </div>
+      <h1 class="hero">今天要<em>整理</em>什麼？</h1>
       <div id="conn-error" class="card warn" hidden>
         <h3>連不上伺服器</h3>
         <p id="load-error"></p>
@@ -514,11 +696,12 @@
       </div>
       <div class="actions">
         <button id="open-upload" class="action primary">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
-          <span><b>上傳錄音檔</b><small>已經錄好的會議或課堂錄音</small></span>
+          <span class="adeco" id="a-deco" aria-hidden="true"></span>
+          <span class="aicon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg></span>
+          <span><b>上傳錄音檔</b><small>會議或課堂錄音，自動轉文字並整理</small></span>
         </button>
         <button id="open-live" class="action">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          <span class="aicon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span>
           <span><b>現場錄音</b><small>邊錄邊出逐字稿，畫面要一直開著</small></span>
         </button>
       </div>
@@ -543,6 +726,7 @@
       <label class="drop" id="drop">
         <input id="up-file" type="file" multiple
                accept="audio/*,.m4a,.mp3,.wav,.aac,.flac,.ogg,.opus,.mp4,.mov,.webm,.qta,.caf,.aif,.aiff,.wma">
+        <span class="dicon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M5 10v4M9.5 6v12M14 9v6M18.5 7v10"/></svg></span>
         <b>選擇錄音檔</b>
         <small>可以一次選好幾個。m4a、mp3、wav 都可以。</small>
       </label>
@@ -567,7 +751,7 @@
             <option value="0">不確定，自動判斷</option>
             <option value="1">1 人</option>
             <option value="2">2 人</option>
-            <option value="3">3 人</option>
+            <option value="3" selected>3 人</option>
             <option value="4">4 人</option>
             <option value="5">5 人</option>
             <option value="6">6 人</option>
@@ -590,8 +774,8 @@
         上傳時請留在這個畫面、不要鎖定手機。如果中斷了，回到這裡會自動接著傳。
       </p>
       <div id="up-done" class="card" style="margin-top:14px" hidden>
-        <h3>上傳完成，開始轉文字</h3>
-        <p>一小時的錄音大約要 6 分鐘。轉文字在伺服器上進行，現在可以關掉這個畫面，好了之後會出現在紀錄裡。</p>
+        <h3>上傳完成，開始處理</h3>
+        <p>一小時的錄音大約要 7 分鐘，會議錄音轉完文字後會自動整理成會議記錄。都在伺服器上進行，現在可以關掉這個畫面。</p>
         <button id="up-done-home" class="btn primary">回首頁看進度</button>
       </div>
     </div>
@@ -684,6 +868,6 @@
 <!-- ?v= 是必要的：index.html 和 app.js 會被各自快取，版本對不上時
      畫面上看得到新按鈕、但監聽器在舊檔裡，按了完全沒反應。
      這個字串要跟 sw.js 的 VERSION 一致，selftest 會檢查。 -->
-<script src="app.js?v=v24"></script>
+<script src="app.js?v=v25"></script>
 </body>
 </html>

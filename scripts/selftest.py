@@ -720,6 +720,54 @@ def test_uploads(gate):
         asyncio.run(scenario(tmp))
 
 
+def test_meeting_notes(gate):
+    import io
+    from server import meeting_notes as mn
+
+    segs = [{"start_s": 0.0, "speaker": 1, "text": "現在不用讀得很細，先大量搜尋把文獻分類"},
+            {"start_s": 9.0, "speaker": 1, "text": "後面再細讀真正相關的文章就可以了"},
+            {"start_s": 20.0, "speaker": 2, "text": "我這週看的第一篇是在講負載卸載"},
+            {"start_s": 25.0, "speaker": 2, "text": "嗯"}]
+    gate.check(mn.main_speaker(segs) == 1, "講最多話的人當成教授")
+    lines = mn.transcript_lines(segs)
+    gate.check(len(lines) == 3 and "（教授）" in lines[0][1] and "（教授）" not in lines[2][1],
+               "只有主要講者標教授，太短的列不給模型")
+    gate.check(len(mn.chunk_lines(lines, 30)) == 3 and len(mn.chunk_lines(lines, 1000)) == 1,
+               "逐字稿照字數分塊，不切斷一行")
+    prof = mn._bigrams(segs[0]["text"] + segs[1]["text"])
+    gate.check(mn.grounded({"quote": "先大量搜尋把文獻分類", "text": "先大量搜尋文獻並分類，不用細讀"}, prof),
+               "引文對得上教授的話才收")
+    gate.check(not mn.grounded({"quote": "評估期刊的影響力與嚴謹性", "text": "文獻需評估期刊影響力"}, prof),
+               "逐字稿沒講的內容會被擋掉")
+    gate.check(not mn.grounded({"quote": "我這週看的第一篇是在講負載卸載", "text": "第一篇在講負載卸載"}, prof),
+               "照抄學生報告會被擋掉")
+    gate.check(not mn.grounded({"quote": "", "text": "沒有依據"}, prof), "沒有引文就不收")
+    gate.check(mn.parse_ts("00:12:34", 0, 9999) == 754 and mn.parse_ts("99:00:00", 10, 20) == 10,
+               "時間超出這一塊就退回開頭")
+    gate.check(mn.clean_item("3. 教授建議：先畫架構圖") == "先畫架構圖", "拿掉模型自己編的號碼和開頭")
+    gate.check(mn.default_sheet_name("2026-11-04T10:00:00+08:00") == "115.11.4第一次",
+               "工作表名稱用民國年")
+    gate.check(mn.default_sheet_name("2026-11-04T10:00:00+08:00", ["116.10.14第三次"]) == "115.11.4第四次",
+               "次數接著前一筆")
+    gate.check([mn.parse_nth("第十二次"), mn.parse_nth("第二十次"), mn.cn_number(21)] == [12, 20, "二十一"],
+               "第幾次的中文數字")
+    gate.check(mn.clean_sheet_name("a/b:c" + "x" * 40) == ("a-b-c" + "x" * 40)[:31], "Excel 不接受的名稱會被修掉")
+    try:
+        import openpyxl
+    except ImportError:
+        gate.check(False, "openpyxl 已安裝")
+        return
+    notes = {"columns": {"literature": [{"text": "甲", "t": 0}, {"text": "乙", "t": 5}],
+                         "next": [{"text": "丙", "t": 9}]}}
+    wb = openpyxl.load_workbook(io.BytesIO(mn.build_xlsx([("A", notes), ("A", notes)])))
+    ws = wb.worksheets[0]
+    gate.check(wb.sheetnames == ["A", "A(2)"], "同名工作表不會讓 Excel 檔壞掉")
+    gate.check([c.value for c in ws[1]] == [c[1] for c in mn.COLUMNS], "Excel 五欄標題")
+    gate.check(ws["A2"].value == "1.甲" and ws["A3"].value == "2.乙" and ws["C2"].value == "丙",
+               "多則有編號、只有一則不編號")
+    gate.check(ws["A1"].font.name == "標楷體" and ws["A2"].font.sz == 12, "Excel 字型跟原本的表一樣")
+
+
 def test_term_fix(gate):
     from server.term_fix import TermFixer
     fixer = TermFixer([], corrections={"深層式": "生成式"})
@@ -830,6 +878,7 @@ def main() -> int:
     print("\n[ASR 後處理 §4.4]")
     test_postprocess(gate)
     test_uploads(gate)
+    test_meeting_notes(gate)
     test_term_fix(gate)
     test_diarize(gate)
     print("\n[OOM 偵測 §7.4]")

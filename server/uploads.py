@@ -18,8 +18,10 @@ import time
 import uuid
 from pathlib import Path
 
-from . import audio_store, config, courses, diarize, meeting, storage, term_fix, ws_session
+from . import (audio_store, config, courses, diarize, meeting, meeting_notes, storage,
+               term_fix, ws_session)
 from .asr import ASRVramLow
+from .llm_manager import LLMUnavailable
 from .audio_pipeline import is_oom
 
 log = logging.getLogger(__name__)
@@ -179,7 +181,7 @@ def retranscribe(session_id: str, speakers: int) -> None:
     if s is None:
         raise UploadError("找不到這筆紀錄")
     job = load_job(s)
-    if job.get("status") in ("queued", "running"):
+    if job.get("status") in ("queued", "running") or notes_busy(job):
         raise UploadError("這筆正在處理中")
     source = job.get("source") if job.get("status") == "failed" else None
     source = source if source and os.path.exists(source) else s.get("audio_path")
@@ -189,6 +191,24 @@ def retranscribe(session_id: str, speakers: int) -> None:
         "status": "queued", "stage": "queued", "progress": 0, "source": source,
         "speakers": max(0, int(speakers or 0)), "terms": job.get("terms", ""),
         "diarize": s["course_id"] == "meeting", "queued_at": time.time()})
+    enqueue(session_id)
+
+
+def notes_busy(job: dict) -> bool:
+    return job.get("notes_status") in ("queued", "running")
+
+
+def request_meeting_notes(session_id: str) -> None:
+    """重新整理會議記錄；現場錄的會議也從這裡補。"""
+    s = storage.get_session(session_id)
+    if s is None:
+        raise UploadError("找不到這筆紀錄")
+    job = load_job(s)
+    if job.get("status") in ("queued", "running") or notes_busy(job):
+        raise UploadError("這筆正在處理中")
+    if not storage.list_segments(session_id):
+        raise UploadError("這筆沒有逐字稿，沒辦法整理")
+    _update(session_id, job, notes_status="queued", notes_progress=0, notes_error=None)
     enqueue(session_id)
 
 
@@ -263,6 +283,8 @@ async def _run_job(session_id: str) -> None:
         return
     job = load_job(s)
     if job.get("status") not in ("queued", "running"):
+        if notes_busy(job):
+            await _run_meeting_notes(session_id, job)
         return
     from .vad import make_vad
     course = courses.get_course(s["course_id"])
@@ -306,10 +328,12 @@ async def _run_job(session_id: str) -> None:
 
     fresh = storage.get_session(session_id)
     if job.get("diarize") or not rows:
-        # 會議的整理格式另外定，這裡不套課堂筆記的 prompt
+        # 會議有自己的五欄格式，不套課堂筆記的 prompt
         storage.finish_session(
             session_id, fresh.get("ended_at") or _now_iso(), duration,
             fresh.get("final_md"), fresh.get("handcopy_md"), audio_path)
+        if rows:
+            await _run_meeting_notes(session_id, job)
     else:
         try:
             await finish_notes(session_id, fresh)
@@ -317,6 +341,60 @@ async def _run_job(session_id: str) -> None:
             # 逐字稿已經存好了，筆記失敗可以從詳細頁重試
             log.warning("上傳檔產生筆記失敗：%s", e)
             _update(session_id, job, notes_error=str(e))
+
+
+async def _run_meeting_notes(session_id: str, job: dict) -> None:
+    """逐字稿已經存好了，這一步失敗不算轉錄失敗，詳細頁可以重試。"""
+    s = storage.get_session(session_id)
+    if s is None:
+        return
+    summarizer = _deps["summarizer"]
+    _update(session_id, job, notes_status="running", notes_progress=0, notes_error=None)
+
+    async def before_call():
+        _check_cancel(session_id)
+        while live_recording():
+            await asyncio.sleep(3)
+
+    async def on_progress(frac):
+        _update(session_id, job, notes_progress=round(frac, 3))
+
+    try:
+        names = json.loads(s.get("speaker_names") or "{}") or {}
+    except ValueError:
+        names = {}
+    glossary, _ = meeting.parse_terms(job.get("terms", ""))
+    try:
+        notes = await meeting_notes.generate(
+            summarizer, storage.list_segments(session_id), names, glossary,
+            on_progress, before_call)
+    except _Cancelled:
+        raise
+    except meeting_notes.NoContent as e:
+        _update(session_id, job, notes_status="failed", notes_error=str(e))
+        return
+    except (LLMUnavailable, RuntimeError) as e:
+        log.warning("會議記錄整理失敗：%s", e)
+        _update(session_id, job, notes_status="failed",
+                notes_error="整理時發生問題，可以再試一次（%s）" % e)
+        return
+    old = meeting_notes.load(s)
+    notes["sheet_name"] = (old or {}).get("sheet_name") or meeting_notes.default_sheet_name(
+        s["started_at"], [n["name"] for n in meeting_sheets()
+                          if n["started_at"] < s["started_at"]])
+    storage.set_meeting_notes(session_id, notes)
+    _update(session_id, job, notes_status="done", notes_progress=1)
+
+
+def meeting_sheets() -> list:
+    """所有會議記錄，由舊到新。"""
+    out = []
+    for row in storage.list_meeting_notes():
+        notes = meeting_notes.load(row)
+        if notes:
+            out.append({"id": row["id"], "started_at": row["started_at"],
+                        "name": notes.get("sheet_name") or "", "notes": notes})
+    return out
 
 
 def _now_iso() -> str:
@@ -355,14 +433,14 @@ async def _worker() -> None:
             await asyncio.to_thread(_deps["engine"].unload)
 
 
-def start(engine, llm, finish_notes):
+def start(engine, llm, finish_notes, summarizer):
     """啟動 worker，並把重啟前沒做完的接回來。回傳 task 供關閉時取消。"""
     global _queue
     _queue = asyncio.Queue()
-    _deps.update(engine=engine, llm=llm, finish_notes=finish_notes)
+    _deps.update(engine=engine, llm=llm, finish_notes=finish_notes, summarizer=summarizer)
     clean_stale()
     for row in storage.list_unfinished_jobs():
         job = load_job(row)
-        if job.get("status") in ("queued", "running"):
+        if job.get("status") in ("queued", "running") or notes_busy(job):
             enqueue(row["id"])
     return asyncio.create_task(_worker(), name="upload-worker")

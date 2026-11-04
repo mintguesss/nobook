@@ -85,6 +85,8 @@ def init(db_path=None) -> None:
         _migrate(cur, "sessions", "job", "TEXT")
         _migrate(cur, "sessions", "speaker_names", "TEXT")
         _migrate(cur, "segments", "speaker", "INTEGER")
+        # 會議記錄的五欄整理（JSON），欄位見 meeting_notes.py
+        _migrate(cur, "sessions", "meeting_notes", "TEXT")
         cur.close()
         _conn.commit()
 
@@ -324,6 +326,20 @@ def list_unfinished_jobs():
     with _cursor() as cur:
         cur.execute("SELECT id, job FROM sessions WHERE job IS NOT NULL "
                     "ORDER BY started_at")
+        return [dict(r) for r in cur.fetchall()]
+
+
+def set_meeting_notes(session_id: str, notes: dict) -> None:
+    with _cursor() as cur:
+        cur.execute("UPDATE sessions SET meeting_notes=? WHERE id=?",
+                    (json.dumps(notes, ensure_ascii=False), session_id))
+
+
+def list_meeting_notes():
+    """有會議記錄的紀錄，由舊到新。"""
+    with _cursor() as cur:
+        cur.execute("SELECT id, started_at, meeting_notes FROM sessions "
+                    "WHERE meeting_notes IS NOT NULL ORDER BY started_at")
         return [dict(r) for r in cur.fetchall()]
 
 

@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import (asr, audio_pipeline, audio_store, config, courses, export,
-               storage, term_fix, uploads, ws_session)
+               meeting_notes, storage, term_fix, uploads, ws_session)
 from .llm_manager import LLMManager, LLMUnavailable
 from .summarizer import Summarizer
 
@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
     # 先把 silero-vad 載進來，第一堂課的第一段才不會多等模型載入
     asyncio.get_running_loop().run_in_executor(None, audio_pipeline.default_vad)
     idle_task = asyncio.create_task(_idle_unload_loop(llm))
-    upload_task = uploads.start(state["engine"], llm, _finish_from_db)
+    upload_task = uploads.start(state["engine"], llm, _finish_from_db, state["summarizer"])
     try:
         yield
     finally:
@@ -163,6 +163,63 @@ async def api_retranscribe(session_id: str, speakers: int = Body(0, embed=True))
     except uploads.UploadError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True}
+
+
+@app.post("/api/sessions/{session_id}/meeting-notes")
+async def api_meeting_notes(session_id: str):
+    try:
+        uploads.request_meeting_notes(session_id)
+    except uploads.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.post("/api/sessions/{session_id}/meeting-sheet")
+async def api_meeting_sheet(session_id: str, payload: dict = Body(...)):
+    """改工作表名稱，例如第幾次、民國年。"""
+    s = storage.get_session(session_id)
+    notes = meeting_notes.load(s) if s else None
+    if not notes:
+        raise HTTPException(status_code=404, detail="這筆還沒有會議記錄")
+    name = meeting_notes.clean_sheet_name(payload.get("name"))
+    if not name:
+        raise HTTPException(status_code=400, detail="名稱不能空白")
+    notes["sheet_name"] = name
+    storage.set_meeting_notes(session_id, notes)
+    return {"ok": True, "name": name}
+
+
+def _xlsx_response(sheets, filename):
+    from fastapi.responses import Response
+    from urllib.parse import quote
+    try:
+        data = meeting_notes.build_xlsx(sheets)
+    except ImportError:
+        raise HTTPException(status_code=503,
+                            detail="伺服器未安裝 openpyxl，無法輸出 Excel 檔")
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename*=UTF-8''%s" % quote(filename)})
+
+
+@app.get("/api/sessions/{session_id}/meeting-notes.xlsx")
+async def api_meeting_xlsx(session_id: str):
+    s = storage.get_session(session_id)
+    notes = meeting_notes.load(s) if s else None
+    if not notes:
+        raise HTTPException(status_code=404, detail="這筆還沒有會議記錄")
+    name = notes.get("sheet_name") or "會議記錄"
+    return _xlsx_response([(name, notes)], "會議記錄_%s.xlsx" % name)
+
+
+@app.get("/api/meeting-notes.xlsx")
+async def api_all_meetings_xlsx():
+    """全部會議放進同一個檔，一次一張工作表。"""
+    sheets = [(m["name"], m["notes"]) for m in uploads.meeting_sheets()]
+    if not sheets:
+        raise HTTPException(status_code=404, detail="還沒有會議記錄")
+    return _xlsx_response(sheets, "會議記錄_全部.xlsx")
 
 
 @app.post("/api/sessions/{session_id}/speakers")

@@ -28,6 +28,7 @@ opencc-python-reimplemented>=0.1.7
 
 # 匯出
 python-docx              # Word 匯出（server/docx_export.py）
+openpyxl                 # 會議記錄的 Excel（server/meeting_notes.py）
 
 # 驗證腳本
 markdown-it-py>=3.0
