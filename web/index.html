@@ -22,11 +22,11 @@
     --line: #2b3039;
     --fg: #f2f0ea;
     --fg-dim: #98a1ac;
-    --accent: #f2b25c;
-    --accent-2: #e8923f;
-    --accent-fg: #241603;
-    --accent-soft: rgba(242, 178, 92, .14);
-    --glow: rgba(242, 178, 92, .13);
+    --accent: #c9b8f5;
+    --accent-2: #a78ff0;
+    --accent-fg: #1d1430;
+    --accent-soft: rgba(201, 184, 245, .15);
+    --glow: rgba(201, 184, 245, .14);
     --ok: #6fd29a;
     --warn: #ffd27a;
     --warn-soft: rgba(255, 210, 122, .11);
@@ -34,7 +34,7 @@
     --bad-soft: rgba(255, 141, 125, .12);
     --shadow: 0 14px 40px rgba(0, 0, 0, .5);
     --bar-bg: rgba(11, 13, 16, .78);
-    --spk-1: #f2b25c; --spk-2: #6fcfc3; --spk-3: #b6aaf7;
+    --spk-1: #c9b8f5; --spk-2: #6fcfc3; --spk-3: #e3dd8f;
     --spk-4: #f293b4; --spk-5: #82b9f2; --spk-6: #a9d87e;
     --radius: 18px;
     --serif: ui-serif, "Songti TC", "Noto Serif TC", "Noto Serif CJK TC", Georgia, serif;
@@ -47,11 +47,11 @@
     --line: #dcd6c9;
     --fg: #1f1d19;
     --fg-dim: #6d6a62;
-    --accent: #a9630f;
-    --accent-2: #8c4f08;
-    --accent-fg: #fffaf2;
-    --accent-soft: rgba(169, 99, 15, .12);
-    --glow: rgba(214, 141, 45, .16);
+    --accent: #6d52b8;
+    --accent-2: #573fa0;
+    --accent-fg: #fdfbff;
+    --accent-soft: rgba(109, 82, 184, .12);
+    --glow: rgba(150, 125, 220, .18);
     --ok: #1c8450;
     --warn: #8a5c06;
     --warn-soft: rgba(176, 121, 16, .12);
@@ -59,7 +59,7 @@
     --bad-soft: rgba(191, 53, 40, .1);
     --shadow: 0 10px 28px rgba(50, 40, 20, .14);
     --bar-bg: rgba(246, 243, 236, .82);
-    --spk-1: #a9630f; --spk-2: #0f7a70; --spk-3: #5a4fc0;
+    --spk-1: #6d52b8; --spk-2: #0f7a70; --spk-3: #7d7410;
     --spk-4: #b53a70; --spk-5: #2f6da8; --spk-6: #4f7a1f;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -550,7 +550,7 @@
   .action svg { width: 25px; height: 25px; }
   .action.primary { min-height: 150px; align-items: flex-end; background: linear-gradient(135deg, var(--accent), var(--accent-2)); border: none; }
   .action.primary:active { opacity: 1; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
-  .action.primary .aicon { background: rgba(36, 22, 3, .14); color: var(--accent-fg); }
+  .action.primary .aicon { background: rgba(29, 20, 48, .14); color: var(--accent-fg); }
   .action.primary b { font-size: 22px; }
   .action > span:not(.aicon):not(.adeco) { position: relative; }
   .adeco { position: absolute; top: 18px; right: 16px; display: flex; align-items: center; gap: 4px; height: 66px; opacity: .3; }
@@ -861,6 +861,6 @@
 <!-- ?v= 是必要的：index.html 和 app.js 會被各自快取，版本對不上時
      畫面上看得到新按鈕、但監聽器在舊檔裡，按了完全沒反應。
      這個字串要跟 sw.js 的 VERSION 一致，selftest 會檢查。 -->
-<script src="app.js?v=v27"></script>
+<script src="app.js?v=v28"></script>
 </body>
 </html>
