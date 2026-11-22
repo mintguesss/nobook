@@ -8,7 +8,7 @@
  *
  * 快取只在安裝時整批寫入，頁面和程式才會是同一版。
  */
-const VERSION = 'v29';
+const VERSION = 'v30';
 const CACHE = 'nobook-' + VERSION;
 // 手機剛打開時 Tailscale 常常還沒連上，請求不會失敗、只會一直卡著。
 // 等太久畫面就是一片空白，所以先用快取把畫面開起來。

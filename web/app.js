@@ -35,6 +35,7 @@ const el = {
 
 const state = {
   ws: null, sessionId: null, courseId: 'example',
+  pendingName: '',                       // 開始前打的名稱，等 session 建好才存
   seq: 0, pending: [],                   // 斷線期間累積的 frame
   running: false, paused: false, ended: false,
   startedAt: 0, elapsedBase: 0,
@@ -324,6 +325,7 @@ function handleEvent(msg) {
     case 'session_started':
       state.sessionId = msg.session_id;
       rememberSession();
+      if (state.pendingName) saveLiveName();
       // 接回既有 session 時，seq 要接在伺服器看過的編號之後。
       // 從 0 開始的話會全部撞上 seen_seqs 被當重複丟掉，
       // 畫面上錄音正常在跑，但一句逐字稿都不會出現。
@@ -657,6 +659,8 @@ async function goHome() {
   state.ended = false;
   state.paused = false;
   state.sessionId = null;
+  state.pendingName = '';
+  $('live-name').value = '';
   rememberSession();
   state.seq = 0;
   state.pending = [];
@@ -2408,6 +2412,17 @@ el.courseSelect.addEventListener('change', (e) => {
   try { localStorage.setItem('nobook.liveCourse', e.target.value); } catch (err) { /* 不影響錄音 */ }
 });
 
+// 開始前打的名稱要等伺服器建好 session 才存得進去。重連也會再收到
+// session_started，存成功就清掉，沒成功下次重連再試。
+async function saveLiveName() {
+  const sid = state.sessionId, name = state.pendingName;
+  try {
+    await postJson(`/api/sessions/${sid}/note`, { note: name });
+    if (state.sessionId === sid && state.pendingName === name) state.pendingName = '';
+  } catch (e) { /* 重連時再試，結束後也能在紀錄裡改 */ }
+}
+$('live-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
+
 function micHelp(e) {
   if (e && e.name === 'NotAllowedError') {
     return '瀏覽器沒有麥克風權限。iPhone 請到「設定 → Safari → 麥克風」改成允許，再回來重新開始。';
@@ -2417,6 +2432,7 @@ function micHelp(e) {
 
 el.start.addEventListener('click', async () => {
   el.start.disabled = true;
+  state.pendingName = $('live-name').value.trim();
   try {
     await startAudio();
   } catch (e) {

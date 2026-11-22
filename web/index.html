@@ -787,6 +787,10 @@
         <label for="course-select">這是什麼錄音？</label>
         <select id="course-select"></select>
       </div>
+      <div class="field">
+        <label for="live-name">名稱</label>
+        <input id="live-name" type="text" maxlength="40" autocomplete="off" enterkeyhint="done" placeholder="可以不填，不填就用日期時間">
+      </div>
       <div class="card warn d-block">
         <h3>錄音時請注意</h3>
         <p>畫面要一直開著。切到其他 App、鎖定手機或接電話，那段就錄不到。怕中斷的話，建議用手機內建的錄音 App 錄好再上傳。</p>
@@ -861,6 +865,6 @@
 <!-- ?v= 是必要的：index.html 和 app.js 會被各自快取，版本對不上時
      畫面上看得到新按鈕、但監聽器在舊檔裡，按了完全沒反應。
      這個字串要跟 sw.js 的 VERSION 一致，selftest 會檢查。 -->
-<script src="app.js?v=v29"></script>
+<script src="app.js?v=v30"></script>
 </body>
 </html>
